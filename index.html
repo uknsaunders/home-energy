@@ -19,6 +19,7 @@ main{max-width:640px;margin:0 auto;padding:14px 14px 40px}
 header{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:4px 2px 12px}
 h1{font-size:22px;margin:0}
 h2{font-size:16px;margin:0 0 8px}
+h3{font-size:15px;margin:16px 0 6px}
 .sub{color:var(--muted);font-size:13px}
 button{font:inherit;border:0;border-radius:10px;padding:10px 14px;background:var(--accent);color:#fff;cursor:pointer}
 button.ghost{background:transparent;color:var(--accent);padding:8px}
@@ -124,6 +125,8 @@ html,body{height:100%;overflow:hidden;overscroll-behavior:none}
   <input id="fBal" type="number" inputmode="decimal" step="0.01" placeholder="-239.65">
   <label for="fTemp">Thermostat setting (°C)</label>
   <input id="fTemp" type="number" inputmode="decimal" step="0.5">
+  <label for="fBatt">House battery usable capacity (kWh)</label>
+  <input id="fBatt" type="number" inputmode="decimal" step="0.5">
   <label for="fGas">Gas: kWh per m³ (from the bill; 0 if the meter reports kWh)</label>
   <input id="fGas" type="number" inputmode="decimal" step="0.01">
   <div class="row" style="margin-top:14px"><button id="btnSave">Save and load</button><button class="ghost" id="btnForget">Forget key</button></div>
@@ -136,7 +139,7 @@ html,body{height:100%;overflow:hidden;overscroll-behavior:none}
 (function(){
 'use strict';
 const API='https://api.octopus.energy/v1';
-const DEF={key:'',acct:'',dd:105,gasFactor:11.36,bal:0,baseGas:2.7,temp:21};
+const DEF={key:'',acct:'',dd:105,gasFactor:11.36,bal:0,baseGas:2.7,temp:21,batt:9};
 const TZ='Europe/London';
 const $=id=>document.getElementById(id);
 const store={get(k){try{return JSON.parse(localStorage.getItem(k))}catch(e){return null}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}},del(k){try{localStorage.removeItem(k)}catch(e){}}};
@@ -193,6 +196,12 @@ async function fetchAll(){
         const atc=`E-1R-${p.code}-${res.elec.region}`;
         try{const [u,s]=await Promise.all([get(`${API}/products/${p.code}/electricity-tariffs/${atc}/standard-unit-rates/?${pf36}&page_size=1500`),get(`${API}/products/${p.code}/electricity-tariffs/${atc}/standing-charges/?${pf36}&page_size=1500`)]);
           res.alts.push({name,code:p.code,unit:ddOnly(u),sc:ddOnly(s)})}catch(e){}}
+    }).catch(()=>{}));
+    jobs.push(get(`${API}/products/?is_variable=false&brand=OCTOPUS_ENERGY&page_size=100`).then(async ps=>{
+      res.fixes=[];const reg=res.elec.region;const one=async u=>{const v=ddOnly(await get(u+'?page_size=10'));return v.length?v[0].value_inc_vat:null};
+      for(const [name,re] of [['Octopus 12M Fixed',/^OE-FIX-12M-/],['Octopus 18M Fixed',/^OE-FIX-18M-/]]){const p=ps.find(x=>re.test(x.code));if(!p)continue;
+        try{const b=`${API}/products/${p.code}`;const [eu,es,gu,gs]=await Promise.all([one(`${b}/electricity-tariffs/E-1R-${p.code}-${reg}/standard-unit-rates/`),one(`${b}/electricity-tariffs/E-1R-${p.code}-${reg}/standing-charges/`),one(`${b}/gas-tariffs/G-1R-${p.code}-${reg}/standard-unit-rates/`),one(`${b}/gas-tariffs/G-1R-${p.code}-${reg}/standing-charges/`)]);
+          res.fixes.push({name,eu,es,gu,gs})}catch(e){}}
     }).catch(()=>{}));
   }
   if(gmp){
@@ -301,16 +310,63 @@ function renderDay(){
   $('daySummary').innerHTML=`Gas ${d.g.toFixed(1)} kWh (${gbp(d.gc)}), of which ${d.night.toFixed(1)} kWh overnight (shaded) · Electricity ${d.e.toFixed(1)} kWh from the grid (${gbp(d.ec)}) · Total ${gbp(d.cost)}`;
 }
 
+function priceSmart(m,days,unit,sc){
+  // Last N complete days on a tariff: as used, and with (a) the car charged at 7 kW in the cheapest night half-hours
+  // and (b) the house battery (cfg.batt usable kWh) charged at the night's cheapest rate to cover dearer half-hours.
+  const keys=new Set(days.map(d=>d.key));
+  const car=steadyBlocks(m,45).filter(b=>keys.has(dayKey(b.start)));const carSet=new Set();car.forEach(b=>b.items.forEach(i=>carSet.add(i.interval_start)));
+  const rt=[];let miss=0;
+  for(const r of (m.raw.elec.hh||[])){const t=new Date(r.interval_start),day=dayKey(t);if(!keys.has(day))continue;const p=rateAt(unit,t);if(p==null){miss++;continue}
+    rt.push({s:r.interval_start,t:t.getTime(),k:r.consumption,day,h:hourOf(t),p,car:carSet.has(r.interval_start)})}
+  const byS=new Map(rt.map(x=>[x.s,x]));
+  if(!rt.length||miss>rt.length*0.1)return null;
+  const asis=rt.reduce((s,x)=>s+x.k*x.p/100,0)+days.reduce((s,d)=>s+(rateAt(sc,new Date(d.key+'T12:00:00Z'))||0)/100,0);
+  const carNow=rt.filter(x=>x.car).reduce((s,x)=>s+x.k*x.p/100,0);let carNew=0;
+  for(const b of car){const d0=Date.parse(dayKey(b.start)+'T00:00:00Z');const kwh=b.items.reduce((s,i)=>s+(byS.has(i.interval_start)?byS.get(i.interval_start).k:0),0);
+    const win=rt.filter(x=>x.t>=d0-2*36e5&&x.t<d0+34*36e5&&(x.h>=22||x.h<7)).map(x=>x.p).sort((a,c)=>a-c);if(!win.length)continue;
+    const n=Math.min(win.length,Math.max(1,Math.ceil(kwh/3.5)));carNew+=kwh*win.slice(0,n).reduce((a,c)=>a+c,0)/n/100}
+  let bsave=0;const B=Number(cfg.batt)||0,byDay={},night={};
+  for(const x of rt){if(x.h<7)(night[x.day]=night[x.day]||[]).push(x.p);if(!x.car)(byDay[x.day]=byDay[x.day]||[]).push(x)}
+  for(const d in byDay){if(!night[d])continue;const cheap=Math.min(...night[d]);let left=B;
+    for(const x of byDay[d].sort((a,c)=>c.p-a.p)){if(left<=0||x.p<=cheap+0.01)break;const k=Math.min(left,x.k);bsave+=k*(x.p-cheap)/100;left-=k}}
+  return {asis,smart:asis-carNow+carNew-bsave};
+}
 function renderTariff(m,days){
-  const now=new Date(),r=[];
-  if(m.raw.elec)r.push(['Electricity unit rate',(rateAt(m.raw.elec.unit,now)||0).toFixed(2)+'p/kWh'],['Electricity standing charge',(rateAt(m.raw.elec.sc,now)||0).toFixed(2)+'p/day']);
-  if(m.raw.gas)r.push(['Gas unit rate',(rateAt(m.raw.gas.unit,now)||0).toFixed(2)+'p/kWh'],['Gas standing charge',(rateAt(m.raw.gas.sc,now)||0).toFixed(2)+'p/day']);
-  let h=`<p class="sub" style="margin-top:0">${esc(m.raw.elec?m.raw.elec.tariff:'')} ${esc(m.raw.gas?m.raw.gas.tariff:'')}</p><table>${r.map(x=>`<tr><td>${x[0]}</td><td class="n">${x[1]}</td></tr>`).join('')}</table>`;
-  const ok=(m.raw.alts||[]).length&&days.filter(d=>d.altN>=46);
-  if(ok&&ok.length>=7){const cur=ok.reduce((s,d)=>s+d.ec,0);
-    h+=`<p style="margin-bottom:4px"><b>Electricity on other Octopus tariffs</b>, last ${ok.length} days, same half-hours as she used:</p><table><tr><td>Flexible Octopus (now)</td><td class="n">${gbp(cur)}</td></tr>`+
-      m.raw.alts.map(a=>{const v=ok.reduce((s,d)=>s+(d.alt[a.name]||0),0);return `<tr><td>${esc(a.name)}</td><td class="n">${gbp(v)} <span class="sub">(${v<cur?'−'+gbp(cur-v).slice(1):'+'+gbp(v-cur).slice(1)})</span></td></tr>`}).join('')+
-      `</table><p class="sub">Time-of-use tariffs only pay off when the car and battery charge in their cheap hours: set the 7 kW charger to full speed on a schedule, not its slow solar or eco mode. Go needs Octopus to accept the car; Flux needs the solar installation certificate.</p>`}
+  const now=new Date(),r=[],n=days.length;
+  if(m.raw.elec)r.push(['Electricity',(rateAt(m.raw.elec.unit,now)||0).toFixed(2)+'p/kWh · '+(rateAt(m.raw.elec.sc,now)||0).toFixed(2)+'p/day']);
+  if(m.raw.gas)r.push(['Gas',(rateAt(m.raw.gas.unit,now)||0).toFixed(2)+'p/kWh · '+(rateAt(m.raw.gas.sc,now)||0).toFixed(2)+'p/day']);
+  let h=`<h3>Now: Flexible Octopus</h3><table>${r.map(x=>`<tr><td>${x[0]}</td><td class="n">${x[1]}</td></tr>`).join('')}</table>`;
+  if(m.raw.elec&&n>=14){
+    const rows=[['Flexible Octopus (now)','',m.raw.elec.unit,m.raw.elec.sc]].concat((m.raw.alts||[]).map(a=>[a.name,a.name==='Octopus Go'?'*':a.name==='Octopus Flux'?'**':'',a.unit,a.sc]));
+    const priced=rows.map(([nm,mk,u,sc])=>({nm,mk,v:priceSmart(m,days,u,sc)})).filter(x=>x.v);
+    const base=priced[0]&&priced[0].v.asis;
+    h+=`<h3>Electricity on Octopus tariffs, last ${n} days</h3><table><tr><th>Tariff</th><th class="n">As used</th><th class="n">Cheap-hours charging†</th></tr>`+
+      priced.map((x,i)=>`<tr><td>${esc(x.nm)}${x.mk}</td><td class="n">${gbp(x.v.asis)}</td><td class="n"><b>${gbp(x.v.smart)}</b>${base&&i>0?`<div class="sub">${x.v.smart<base?'saves '+gbp(base-x.v.smart):'+'+gbp(x.v.smart-base).slice(1)}</div>`:''}</td></tr>`).join('')+
+      `</table><p class="sub">* Octopus Go needs Octopus to accept the car. Its registration check uses the DVLA, so a Jersey-registered car fails until it's re-registered in the UK.<br>** Octopus Flux needs a solar installation certificate (MCS, or Octopus's route for systems without one).<br>† The car charged at full 7 kW in the cheapest night half-hours, and the house battery (${Number(cfg.batt)||0} kWh usable) charged overnight to cover dearer hours. Solar export income on Flux isn't included.</p>`}
+  // gas and fixed deals
+  const gT=days.reduce((s,d)=>s+d.g,0),eT=days.reduce((s,d)=>s+d.e,0);
+  if(m.raw.gas&&n>=14){const gu=(rateAt(m.raw.gas.unit,now)||0),gs=(rateAt(m.raw.gas.sc,now)||0);const flexG=(gT*gu+n*gs)/100;
+    h+=`<h3>Gas, last ${n} days</h3><table><tr><td>Flexible Octopus (now)</td><td class="n">${gbp(flexG)}</td></tr>`+
+      (m.raw.fixes||[]).filter(f=>f.gu!=null).map(f=>{const v=(gT*f.gu+n*(f.gs||0))/100;return `<tr><td>${esc(f.name)} <span class="sub">${f.gu.toFixed(2)}p/kWh</span></td><td class="n">${gbp(v)} <span class="sub">(${v<flexG?'−':'+'}${gbp(Math.abs(v-flexG)).slice(1)})</span></td></tr>`}).join('')+
+      `</table><p class="sub">Fixed prices are today's offers. Flexible follows the Ofgem price cap, which suppliers forecast to rise by roughly 20–28% on 1 January 2027. Ofgem confirms it by 25 November. If it rises that much, a fix at today's price could work out cheaper from January.</p>`}
+  h+=`<h3>Other suppliers to compare</h3>
+  <p class="sub" style="margin-top:0">Rates from published comparisons, mid-November 2026. They vary by region and change often, so check before switching. EV tariffs may also check the car's registration.</p>
+  <table>
+  <tr><th colspan="2">EV tariffs (cheap overnight rate for the whole house)</th></tr>
+  <tr><td>EDF GoElectric</td><td class="n">≈7p, 11pm–6am</td></tr>
+  <tr><td>E.ON Next Drive Smart</td><td class="n">≈7–8p, midnight–6am</td></tr>
+  <tr><td>So Energy EV</td><td class="n">≈6.5p, midnight–5am</td></tr>
+  <tr><td>British Gas EV Power</td><td class="n">≈9p, midnight–5am</td></tr>
+  <tr><td>OVO Charge Anytime</td><td class="n">car only, ≈7–14p</td></tr>
+  <tr><th colspan="2">Solar export (paid per kWh sent to the grid)</th></tr>
+  <tr><td>EDF Export 12m (EDF customers)</td><td class="n">≈15p</td></tr>
+  <tr><td>E.ON Next Export Exclusive (E.ON customers)</td><td class="n">≈13–16.5p</td></tr>
+  <tr><td>Scottish Power SmartGen (any supplier)</td><td class="n">≈12p</td></tr>
+  <tr><td>Outgoing Octopus (Octopus customers)</td><td class="n">12p</td></tr>
+  <tr><th colspan="2">Gas</th></tr>
+  <tr><td>British Gas Cap Tracker / EDF Simply Tracker</td><td class="n">≈£50 a year below the cap (dual fuel)</td></tr>
+  <tr><td>E.ON Next and EDF fixes</td><td class="n">often the cheapest fixes; compare after 25 Nov</td></tr>
+  </table>`;
   $('tariff').innerHTML=h;
 }
 
@@ -348,6 +404,8 @@ function renderDD(m,done){
   const eDays=done.slice(-365), aElec=eDays.length?sum(eDays,d=>d.e)/eDays.length*365:0;
   const year=aGas*ge+365*gs+aElec*ee+365*es, bal=Number(cfg.bal)||0;
   const r5=v=>Math.ceil(v/5)*5, sugg=r5(Math.max(0,(year-bal)/12));
+  const jan=Date.UTC(now.getUTCMonth()===0?now.getUTCFullYear():now.getUTCFullYear()+1,0,1),fr=Math.max(0,Math.min(1,(now.getTime()+365*864e5-jan)/(365*864e5)));
+  const riseSugg=r5(Math.max(0,(year*(1+0.25*fr)-bal)/12));
   const eac=(m.raw.gas&&m.raw.gas.eac?m.raw.gas.eac*ge+365*gs:0)+(m.raw.elec&&m.raw.elec.eac?m.raw.elec.eac*ee+365*es:0);
   $('kpiDD').innerHTML=`<div class="l">Suggested Direct Debit</div><div class="v">£${sugg}</div><div class="l">a month</div>`;
   $('ddCard').innerHTML=`<div class="kpis" style="margin:0 0 8px"><div class="kpi" style="box-shadow:none;background:var(--bg)"><div class="l">Suggested</div><div class="v">£${sugg}</div><div class="l">a month</div></div><div class="kpi" style="box-shadow:none;background:var(--bg)"><div class="l">Paying now</div><div class="v">${gbp(Number(cfg.dd)||0)}</div><div class="l">${sugg>(Number(cfg.dd)||0)?'short by '+gbp(sugg-(Number(cfg.dd)||0))+' a month':'enough'}</div></div></div>
@@ -355,6 +413,7 @@ function renderDD(m,done){
   <tr><td>Electricity from the grid</td><td class="n">${Math.round(aElec).toLocaleString('en-GB')} kWh · ${gbp(aElec*ee+365*es)}</td></tr>
   <tr><td>Year in total</td><td class="n">${gbp(year)}</td></tr>
   <tr><td>Balance to ${bal<0?'clear':'use up'} over 12 months</td><td class="n">${gbp(-bal)}</td></tr>
+  <tr><td>If prices rise 25% on 1 January, as suppliers forecast</td><td class="n">£${riseSugg} a month</td></tr>
   ${eac?`<tr><td>Octopus's own yearly estimate</td><td class="n">${gbp(eac)} (${gbp(eac/12)} a month)</td></tr>`:''}</table>
   <p class="sub">Gas is projected from the last ${win.length} days of heating, scaled to a full year using a typical northern England weather pattern, so a cold or mild spell moves it. Electricity uses the average of the ${eDays.length} days of readings so far, which covers ${eDays.length>=330?'a full year':'only part of the year'}. Update the balance in Settings after each bill.</p>`;
 
@@ -365,10 +424,9 @@ function renderDD(m,done){
   const nightW=sum(win,d=>{let v=0;for(let j=0;j<12;j++)v+=d.hhG[j]||0;return v}), dayW=sum(win,d=>{let v=0;for(let j=18;j<32;j++)v+=d.hhG[j]||0;return v});
   if(heatWin>0){ys.push(['Heating off midnight–6am',heatCost*Math.min(1,nightW/heatWin),`${Math.round(nightW/heatWin*100)}% of recent heating ran overnight`]);
     ys.push(['Heating off 9am–4pm when nobody is in',heatCost*Math.min(1,dayW/heatWin),`${Math.round(dayW/heatWin*100)}% of recent heating ran in the working day. Only if the house is empty`]);}
-  const flux=(m.raw.alts||[]).find(a=>a.name==='Octopus Flux');
-  const car=steadyBlocks(m,28);
-  if(flux&&car.length){const cheap=Math.min(...flux.unit.map(r=>r.value_inc_vat))/100,kwh=sum(car,b=>b.kwh);
-    ys.push(['Car charged at full speed in Flux cheap hours',Math.max(0,(sum(car,b=>b.cost)-kwh*cheap))*365/28,`${car.length} slow charges in the last 4 weeks; needs Flux (solar certificate)`])}
+  if(m.raw.elec&&done.length>=14){const d30=done.slice(-30),base=priceSmart(m,d30,m.raw.elec.unit,m.raw.elec.sc);
+    for(const [nm,mk,why] of [['Octopus Flux','**','needs the solar installation certificate'],['Octopus Go','*','needs Octopus to accept the Jersey-registered car']]){const a=(m.raw.alts||[]).find(x=>x.name===nm);if(!a||!base)continue;
+      const v=priceSmart(m,d30,a.unit,a.sc);if(v&&v.smart<base.asis)ys.push([`Switch electricity to ${nm}${mk}, charge the car and battery in its cheap hours`,(base.asis-v.smart)*365/d30.length,`${mk} ${why}. Uses the last ${d30.length} days of readings`])}}
   ys.sort((a,b)=>b[1]-a[1]);
   $('saveCard').innerHTML='<table><tr><th>Change</th><th class="n">A year</th><th class="n">A month</th></tr>'+ys.map(y=>`<tr><td>${y[0]}<div class="sub">${y[2]}</div></td><td class="n">${gbp(y[1])}</td><td class="n">${gbp(y[1]/12)}</td></tr>`).join('')+'</table><p class="sub">Savings overlap, so they don\'t simply add up. For example, a lower thermostat also cuts the overnight and daytime figures. Turning the boiler\'s flow temperature down to about 60°C is another free saving these figures don\'t include.</p>';
 }
@@ -383,7 +441,7 @@ async function refresh(){
     $('dataNote').textContent='Latest readings from Octopus: gas to '+lastT(raw.gas&&raw.gas.hh)+', electricity to '+lastT(raw.elec&&raw.elec.hh)+'.';return true}
   catch(e){const msg=(e&&e.message)||'Could not reach Octopus.';setStatus('Not updated: '+esc(/fetch|network|load/i.test(msg)?'no connection to Octopus.':msg));$('setupErr').textContent=msg;return false}
 }
-function fillSettings(){$('fKey').value=cfg.key||'';$('fAcct').value=cfg.acct||'';$('fDD').value=cfg.dd;$('fGas').value=cfg.gasFactor;$('fBal').value=cfg.bal;$('fTemp').value=cfg.temp}
+function fillSettings(){$('fKey').value=cfg.key||'';$('fAcct').value=cfg.acct||'';$('fDD').value=cfg.dd;$('fGas').value=cfg.gasFactor;$('fBal').value=cfg.bal;$('fTemp').value=cfg.temp;$('fBatt').value=cfg.batt}
 function showSetup(){go('settings')}
 function showHome(){$('connect').classList.toggle('hidden',!!model);$('home').classList.toggle('hidden',!model)}
 // screens: one per hash, so the phone's own back button works too
@@ -395,7 +453,7 @@ function go(id){if(id==='home'){back();return}depth++;location.hash=id}
 function back(){if(depth>0){depth--;history.back()}else{history.replaceState(null,'',location.pathname+location.search);show()}}
 window.addEventListener('hashchange',()=>{if(!location.hash)depth=0;show()});
 document.addEventListener('click',e=>{const t=e.target.closest('[data-go]');if(t){go(t.dataset.go);return}if(e.target.closest('.back'))back()});
-$('btnSave').onclick=async()=>{cfg=Object.assign({},DEF,{key:$('fKey').value.trim(),acct:$('fAcct').value.trim().toUpperCase(),dd:Number($('fDD').value)||0,gasFactor:Number($('fGas').value)||0,bal:Number($('fBal').value)||0,temp:Number($('fTemp').value)||21});
+$('btnSave').onclick=async()=>{cfg=Object.assign({},DEF,{key:$('fKey').value.trim(),acct:$('fAcct').value.trim().toUpperCase(),dd:Number($('fDD').value)||0,gasFactor:Number($('fGas').value)||0,bal:Number($('fBal').value)||0,temp:Number($('fTemp').value)||21,batt:Number($('fBatt').value)||0});
   if(!cfg.key||!cfg.acct){$('setupErr').textContent='Enter the API key and account number.';return}
   store.set('he_cfg',cfg);$('setupErr').textContent='Loading…';if(await refresh()){$('setupErr').textContent='';showHome();back()}};
 $('btnForget').onclick=()=>{cfg=Object.assign({},DEF);store.del('he_cfg');store.del('he_cache');model=null;fillSettings();showHome();setStatus('Key removed from this phone.')};
