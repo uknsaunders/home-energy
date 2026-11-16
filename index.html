@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Energy">
+<meta name="theme-color" content="#0f6e5c">
+<title>Home Energy</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230f6e5c'/%3E%3Cpath d='M36 8 18 36h12l-4 20 20-30H34z' fill='%23fff'/%3E%3C/svg%3E">
+<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' fill='%230f6e5c'/%3E%3Cpath d='M36 8 18 36h12l-4 20 20-30H34z' fill='%23fff'/%3E%3C/svg%3E">
+<style>
+:root{--bg:#f4f5f3;--card:#fff;--ink:#1d2321;--muted:#66706c;--line:#e3e6e3;--gas:#d9822b;--elec:#2f6fd6;--accent:#0f6e5c;--warn:#b5481f;--warnbg:#fbece6;--okbg:#e6f3ee}
+@media (prefers-color-scheme:dark){:root{--bg:#121514;--card:#1c201f;--ink:#e9ece9;--muted:#9aa49f;--line:#2c3230;--gas:#e9a15a;--elec:#6c9cf0;--accent:#4fc1a6;--warn:#f08f68;--warnbg:#3a231b;--okbg:#17302a}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
+main{max-width:640px;margin:0 auto;padding:14px 14px 40px}
+header{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:4px 2px 12px}
+h1{font-size:22px;margin:0}
+h2{font-size:16px;margin:0 0 8px}
+.sub{color:var(--muted);font-size:13px}
+button{font:inherit;border:0;border-radius:10px;padding:10px 14px;background:var(--accent);color:#fff;cursor:pointer}
+button.ghost{background:transparent;color:var(--accent);padding:8px}
+.card{background:var(--card);border-radius:14px;padding:14px;margin:0 0 12px;box-shadow:0 1px 2px rgba(0,0,0,.06)}
+.kpis{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}
+.kpi{background:var(--card);border-radius:14px;padding:12px;box-shadow:0 1px 2px rgba(0,0,0,.06)}
+.kpi .v{font-size:24px;font-weight:650;margin:2px 0}
+.kpi .l{font-size:13px;color:var(--muted)}
+.alert{border-radius:12px;padding:10px 12px;margin:0 0 8px;background:var(--warnbg);font-size:14.5px}
+.alert b{color:var(--warn)}
+.alert.ok{background:var(--okbg)}
+.alert.ok b{color:var(--accent)}
+.legend{display:flex;gap:14px;font-size:13px;color:var(--muted);margin:2px 0 6px}
+.dot{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+svg{display:block;width:100%;height:auto}
+svg text{fill:var(--muted);font-size:11px}
+.bar{cursor:pointer}
+table{width:100%;border-collapse:collapse;font-size:14px}
+td,th{padding:6px 4px;border-bottom:1px solid var(--line);text-align:left}
+td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+label{display:block;font-size:14px;margin:12px 0 4px}
+input{width:100%;font:inherit;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink)}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.hidden{display:none}
+.daynav{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+.daynav button{padding:6px 12px}
+.err{color:var(--warn);font-size:14px}
+.spin{display:inline-block;width:14px;height:14px;border:2px solid var(--muted);border-top-color:transparent;border-radius:50%;animation:s 1s linear infinite;vertical-align:-2px;margin-right:6px}
+@keyframes s{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<main>
+<header>
+  <div><h1>Home Energy</h1><div class="sub" id="status">Loading…</div></div>
+  <button class="ghost" id="btnSettings" aria-label="Settings">⚙︎ Settings</button>
+</header>
+
+<section id="setup" class="card hidden">
+  <h2>Connect to Octopus</h2>
+  <p class="sub">Your key is saved only on this phone. Get it from your Octopus account on the web: Personal details → Developer settings → API access.</p>
+  <label for="fKey">API key</label>
+  <input id="fKey" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="sk_live_…">
+  <label for="fAcct">Account number</label>
+  <input id="fAcct" autocapitalize="characters" placeholder="A-1234567A">
+  <label for="fDD">Monthly Direct Debit (£)</label>
+  <input id="fDD" type="number" inputmode="decimal" step="1">
+  <label for="fGas">Gas: kWh per m³ (from your bill; 0 if the meter reports kWh)</label>
+  <input id="fGas" type="number" inputmode="decimal" step="0.01">
+  <div class="row" style="margin-top:14px"><button id="btnSave">Save and load</button><button class="ghost" id="btnForget">Forget key</button></div>
+  <p class="err" id="setupErr"></p>
+</section>
+
+<div id="app" class="hidden">
+  <div id="alerts"></div>
+  <div class="kpis" id="kpis"></div>
+  <section class="card">
+    <h2>Cost per day, last 30 days</h2>
+    <div class="legend"><span><i class="dot" style="background:var(--gas)"></i>Gas</span><span><i class="dot" style="background:var(--elec)"></i>Electricity</span><span>Tap a day for detail</span></div>
+    <div id="dailyChart"></div>
+  </section>
+  <section class="card">
+    <h2>When it's used, last 30 days</h2>
+    <div id="bands"></div>
+  </section>
+  <section class="card">
+    <h2>What it's used for, last 30 days</h2>
+    <div id="uses"></div>
+  </section>
+  <section class="card">
+    <div class="daynav"><button class="ghost" id="prevDay" aria-label="Previous day">‹</button><h2 id="dayTitle" style="margin:0"></h2><button class="ghost" id="nextDay" aria-label="Next day">›</button></div>
+    <div class="legend"><span><i class="dot" style="background:var(--gas)"></i>Gas kWh</span><span><i class="dot" style="background:var(--elec)"></i>Electricity kWh</span><span>per half hour</span></div>
+    <div id="dayChart"></div>
+    <div id="daySummary" class="sub" style="margin-top:6px"></div>
+  </section>
+  <section class="card">
+    <h2>Tariff</h2>
+    <div id="tariff"></div>
+  </section>
+  <p class="sub">Octopus publishes smart-meter readings about a day late, so today and yesterday may be incomplete. Costs include VAT and standing charges and are estimates until the bill arrives.</p>
+</div>
+</main>
+
+<script>
+(function(){
+'use strict';
+const API='https://api.octopus.energy/v1';
+const DEF={key:'',acct:'',dd:105,gasFactor:11.36};
+const TZ='Europe/London';
+const $=id=>document.getElementById(id);
+const store={get(k){try{return JSON.parse(localStorage.getItem(k))}catch(e){return null}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}},del(k){try{localStorage.removeItem(k)}catch(e){}}};
+let cfg=Object.assign({},DEF,store.get('he_cfg')||{});
+let model=null, selDay=null;
+
+const dayFmt=new Intl.DateTimeFormat('en-CA',{timeZone:TZ,year:'numeric',month:'2-digit',day:'2-digit'});
+const hourFmt=new Intl.DateTimeFormat('en-GB',{timeZone:TZ,hour:'2-digit',minute:'2-digit',hour12:false});
+const dayKey=t=>dayFmt.format(t);
+const hm=t=>hourFmt.format(t);
+const hourOf=t=>parseInt(hm(t),10);
+const niceDay=k=>{const d=new Date(k+'T12:00:00Z');return d.toLocaleDateString('en-GB',{weekday:'short',day:'numeric',month:'short',timeZone:'UTC'})};
+const gbp=v=>(v<0?'−':'')+'£'+Math.abs(v).toFixed(2);
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+async function get(url,auth){
+  const out=[];let next=url,guard=0;
+  while(next&&guard++<20){
+    const r=await fetch(next,{headers:auth?{Authorization:'Basic '+btoa(cfg.key+':')}:{}});
+    if(r.status===401||r.status===403) throw new Error('Octopus rejected the API key. Check it in Settings.');
+    if(!r.ok) throw new Error('Octopus returned an error ('+r.status+').');
+    const d=await r.json();
+    if(!('results' in d)) return d;
+    out.push(...d.results); next=d.next;
+  }
+  return out;
+}
+const productOf=tc=>tc.split('-').slice(2,-1).join('-');
+const current=ags=>{const now=Date.now();return (ags||[]).find(a=>new Date(a.valid_from)<=now&&(!a.valid_to||new Date(a.valid_to)>now))||(ags||[]).slice(-1)[0]};
+const ddOnly=list=>list.filter(r=>!r.payment_method||r.payment_method==='DIRECT_DEBIT');
+function rateAt(list,t){for(const r of list){if(new Date(r.valid_from)<=t&&(!r.valid_to||new Date(r.valid_to)>t))return r.value_inc_vat}return null}
+
+async function fetchAll(){
+  const acct=await get(`${API}/accounts/${encodeURIComponent(cfg.acct.trim())}/`,true);
+  const prop=(acct.properties||[]).find(p=>!p.moved_out_at)||acct.properties[0];
+  if(!prop) throw new Error('No property found on this account.');
+  const emp=(prop.electricity_meter_points||[]).find(m=>!m.is_export);
+  const gmp=(prop.gas_meter_points||[])[0];
+  const from=new Date(Date.now()-36*864e5);from.setUTCHours(0,0,0,0);
+  const pf='period_from='+from.toISOString();
+  const res={fetched:new Date().toISOString(),from:from.toISOString(),address:prop.address_line_1,elec:null,gas:null};
+  const jobs=[];
+  if(emp){
+    const ag=current(emp.agreements), tc=ag.tariff_code, pc=productOf(tc), serial=emp.meters[emp.meters.length-1].serial_number;
+    res.elec={mpan:emp.mpan,serial,tariff:tc,region:tc.slice(-1)};
+    jobs.push(get(`${API}/electricity-meter-points/${emp.mpan}/meters/${serial}/consumption/?${pf}&page_size=25000&order_by=period`,true).then(v=>res.elec.hh=v.sort((a,b)=>Date.parse(a.interval_start)-Date.parse(b.interval_start))));
+    jobs.push(get(`${API}/products/${pc}/electricity-tariffs/${tc}/standard-unit-rates/?${pf}&page_size=1500`).then(v=>res.elec.unit=ddOnly(v)));
+    jobs.push(get(`${API}/products/${pc}/electricity-tariffs/${tc}/standing-charges/?${pf}&page_size=1500`).then(v=>res.elec.sc=ddOnly(v)));
+    jobs.push(get(`${API}/products/?is_variable=true&brand=OCTOPUS_ENERGY&page_size=100`).then(async ps=>{
+      const want=[['Agile Octopus',/^AGILE-(?!OUTGOING)/],['Octopus Flux',/^FLUX-IMPORT-/],['Octopus Go',/^GO-VAR-/]];
+      res.alts=[];
+      for(const [name,re] of want){const p=ps.find(x=>re.test(x.code));if(!p)continue;
+        const atc=`E-1R-${p.code}-${res.elec.region}`;
+        try{const [u,s]=await Promise.all([get(`${API}/products/${p.code}/electricity-tariffs/${atc}/standard-unit-rates/?${pf}&page_size=1500`),get(`${API}/products/${p.code}/electricity-tariffs/${atc}/standing-charges/?${pf}&page_size=1500`)]);
+          res.alts.push({name,code:p.code,unit:ddOnly(u),sc:ddOnly(s)})}catch(e){}}
+    }).catch(()=>{}));
+  }
+  if(gmp){
+    const ag=current(gmp.agreements), tc=ag.tariff_code, pc=productOf(tc), serial=gmp.meters[gmp.meters.length-1].serial_number;
+    res.gas={mprn:gmp.mprn,serial,tariff:tc};
+    jobs.push(get(`${API}/gas-meter-points/${gmp.mprn}/meters/${serial}/consumption/?${pf}&page_size=25000&order_by=period`,true).then(v=>res.gas.hh=v.sort((a,b)=>Date.parse(a.interval_start)-Date.parse(b.interval_start))));
+    jobs.push(get(`${API}/products/${pc}/gas-tariffs/${tc}/standard-unit-rates/?${pf}&page_size=1500`).then(v=>res.gas.unit=ddOnly(v)));
+    jobs.push(get(`${API}/products/${pc}/gas-tariffs/${tc}/standing-charges/?${pf}&page_size=1500`).then(v=>res.gas.sc=ddOnly(v)));
+  }
+  await Promise.all(jobs);
+  return res;
+}
+
+function build(raw){
+  const days={};
+  const day=k=>days[k]||(days[k]={key:k,e:0,g:0,ec:0,gc:0,night:0,ne:0,ng:0,hhE:new Array(48).fill(null),hhG:new Array(48).fill(null),alt:{},altN:0});
+  const slot=t=>{const [h,m]=hm(t).split(':').map(Number);return h*2+(m>=30?1:0)};
+  if(raw.elec&&raw.elec.hh) for(const r of raw.elec.hh){const t=new Date(r.interval_start),d=day(dayKey(t)),k=r.consumption;d.e+=k;d.ne++;d.hhE[slot(t)]=k;const rt=rateAt(raw.elec.unit,t);if(rt!=null)d.ec+=k*rt/100;if(raw.alts){let all=true;for(const a of raw.alts){const v=rateAt(a.unit,t);if(v==null){all=false;continue}d.alt[a.name]=(d.alt[a.name]||0)+k*v/100}if(all)d.altN++}}
+  const gf=Number(cfg.gasFactor)>0?Number(cfg.gasFactor):1;
+  if(raw.gas&&raw.gas.hh) for(const r of raw.gas.hh){const t=new Date(r.interval_start),d=day(dayKey(t)),k=r.consumption*gf;d.g+=k;d.ng++;d.hhG[slot(t)]=k;if(hourOf(t)<6)d.night+=k;const rt=rateAt(raw.gas.unit,t);if(rt!=null)d.gc+=k*rt/100}
+  const list=Object.values(days).sort((a,b)=>a.key<b.key?-1:1).filter(d=>d.key>=dayKey(new Date(raw.from)));
+  for(const d of list){const noon=new Date(d.key+'T12:00:00Z');
+    if(raw.elec){const s=rateAt(raw.elec.sc,noon)||0;d.ec+=s/100;if(raw.alts)for(const a of raw.alts){d.alt[a.name]=(d.alt[a.name]||0)+(rateAt(a.sc,noon)||0)/100}}
+    if(raw.gas){d.gc+=(rateAt(raw.gas.sc,noon)||0)/100}
+    d.cost=d.ec+d.gc; d.complete=(!raw.elec||d.ne>=46)&&(!raw.gas||d.ng>=46);}
+  return {raw,days:list};
+}
+
+function steadyBlocks(m,sinceDays){
+  // runs of 8+ hours of a flat ~1–2.6 kW draw (typical of a car on a 3-pin charger); short dips allowed
+  const hh=(m.raw.elec&&m.raw.elec.hh)||[];const cut=Date.now()-sinceDays*864e5;const out=[];let run=[],gap=[],on=0;
+  const flush=()=>{if(run.length>=16&&on>=12){const kwh=run.reduce((s,r)=>s+r.consumption,0);out.push({start:new Date(run[0].interval_start),hours:run.length/2,kwh,cost:run.reduce((s,r)=>s+r.consumption*(rateAt(m.raw.elec.unit,new Date(r.interval_start))||0)/100,0),items:run})}run=[];on=0};
+  for(const r of hh){if(new Date(r.interval_start)<cut)continue;
+    if(r.consumption>=0.45&&r.consumption<=1.3){if(run.length)run.push(...gap);gap=[];run.push(r);on++}
+    else{if(run.length)gap.push(r);if(gap.length>4){gap=[];flush()}}}
+  flush();return out;
+}
+
+function render(m){
+  model=m;
+  const done=m.days.filter(d=>d.complete);
+  const last=done[done.length-1];
+  if(!last){$('alerts').innerHTML='<div class="alert">No complete days of readings yet.</div>';return}
+  const prev7=done.slice(-8,-1), last7=done.slice(-7);
+  const avg=(a,f)=>a.length?a.reduce((s,d)=>s+f(d),0)/a.length:0;
+  const monthKey=last.key.slice(0,7);
+  const mtd=m.days.filter(d=>d.key.startsWith(monthKey));
+  const mtdCost=mtd.reduce((s,d)=>s+d.cost,0);
+  const [yy,mm]=monthKey.split('-').map(Number);const dim=new Date(Date.UTC(yy,mm,0)).getUTCDate();
+  const daily7=avg(last7,d=>d.cost), proj=daily7*dim;
+
+  // alerts
+  const al=[];
+  if(last.night>5) al.push(`<b>Heating ran overnight.</b> ${last.night.toFixed(0)} kWh of gas between midnight and 6am on ${niceDay(last.key)} (about ${gbp(last.night*(rateAt(m.raw.gas.unit,new Date(last.key+'T03:00:00Z'))||0)/100)}).`);
+  const g7=avg(prev7,d=>d.g);
+  if(g7>5&&last.g>g7*1.25) al.push(`<b>Gas up ${Math.round((last.g/g7-1)*100)}%</b> on ${niceDay(last.key)}: ${last.g.toFixed(0)} kWh against a ${g7.toFixed(0)} kWh average for the week before.`);
+  for(const b of steadyBlocks(m,4)) al.push(`<b>Long steady electricity draw</b> (car charger in slow mode?) from ${b.start.toLocaleString('en-GB',{weekday:'short',hour:'2-digit',minute:'2-digit',timeZone:TZ})}: ${b.hours} hours, ${b.kwh.toFixed(1)} kWh, about ${gbp(b.cost)}.`);
+  if(cfg.dd>0&&proj>cfg.dd*1.1) al.push(`<b>Direct Debit too low.</b> At last week's rate this month costs about ${gbp(proj)}, against a Direct Debit of ${gbp(Number(cfg.dd))}.`);
+  if(!al.length) al.push('<span class="alert-ok"><b>Nothing unusual</b> in the latest readings.</span>');
+  $('alerts').innerHTML=al.map(a=>`<div class="alert${a.includes('alert-ok')?' ok':''}">${a}</div>`).join('');
+
+  // kpis
+  const k=(l,v,s)=>`<div class="kpi"><div class="l">${l}</div><div class="v">${v}</div><div class="l">${s}</div></div>`;
+  $('kpis').innerHTML=
+    k('Latest full day',gbp(last.cost),`${niceDay(last.key)} · gas ${last.g.toFixed(0)} kWh · elec ${last.e.toFixed(1)} kWh`)+
+    k('Last 7 days',gbp(last7.reduce((s,d)=>s+d.cost,0)),`avg ${gbp(daily7)} a day`)+
+    k('This month so far',gbp(mtdCost),`${mtd.length} days of readings`)+
+    k('Month at this rate',gbp(proj),cfg.dd>0?`Direct Debit ${gbp(Number(cfg.dd))}`:'');
+
+  renderDaily(m);
+  if(!selDay||!m.days.find(d=>d.key===selDay)) selDay=last.key;
+  renderDay();
+  renderTariff(m,done.slice(-30));
+  renderMix(m,done.slice(-30));
+}
+
+function renderDaily(m){
+  const ds=m.days.slice(-30), W=600,H=220,L=34,B=24,T=8, max=Math.max(1,...ds.map(d=>d.cost));
+  const step=Math.ceil(max/4/5)*5||1, top=step*4, bw=(W-L)/ds.length, y=v=>T+(H-T-B)*(1-v/top);
+  let s=`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Cost per day for the last 30 days">`;
+  for(let i=0;i<=4;i++){const v=step*i;s+=`<line x1="${L}" x2="${W}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)"/><text x="${L-4}" y="${y(v)+4}" text-anchor="end">£${v}</text>`}
+  ds.forEach((d,i)=>{const x=L+i*bw+1,w=Math.max(1,bw-2),sel=d.key===selDay;
+    s+=`<g class="bar" data-day="${d.key}" opacity="${d.complete?1:.45}"><rect x="${x}" y="${y(d.gc)}" width="${w}" height="${y(0)-y(d.gc)}" fill="var(--gas)"/><rect x="${x}" y="${y(d.gc+d.ec)}" width="${w}" height="${y(d.gc)-y(d.gc+d.ec)}" fill="var(--elec)"/><rect x="${x-1}" y="${T}" width="${bw}" height="${H-T-B}" fill="transparent" stroke="${sel?'var(--ink)':'none'}" stroke-width="1"/><title>${niceDay(d.key)}: ${gbp(d.cost)} (gas ${gbp(d.gc)}, electricity ${gbp(d.ec)})</title></g>`;
+    if(i%7===0)s+=`<text x="${x}" y="${H-6}">${niceDay(d.key).replace(/^\w+ /,'')}</text>`});
+  s+='</svg>';$('dailyChart').innerHTML=s;
+  $('dailyChart').querySelectorAll('.bar').forEach(g=>g.addEventListener('click',()=>{selDay=g.dataset.day;renderDaily(model);renderDay()}));
+}
+
+function renderDay(){
+  const m=model,i=m.days.findIndex(d=>d.key===selDay),d=m.days[i];if(!d)return;
+  $('dayTitle').textContent=niceDay(d.key)+(d.complete?'':' (incomplete)');
+  $('prevDay').disabled=i<=0;$('nextDay').disabled=i>=m.days.length-1;
+  const W=600,H=200,L=34,B=22,T=8,vals=[...d.hhG,...d.hhE].map(v=>v||0),max=Math.max(0.5,...vals);
+  const top=max>2?Math.ceil(max):Math.ceil(max*2)/2,bw=(W-L)/48,y=v=>T+(H-T-B)*(1-v/top);
+  let s=`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Half-hourly gas and electricity">`;
+  for(const v of [0,top/2,top])s+=`<line x1="${L}" x2="${W}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)"/><text x="${L-4}" y="${y(v)+4}" text-anchor="end">${v.toFixed(v<10?1:0)}</text>`;
+  for(let j=0;j<48;j++){const x=L+j*bw,g=d.hhG[j]||0,e=d.hhE[j]||0,t=`${String(j>>1).padStart(2,'0')}:${j%2?'30':'00'}`;
+    s+=`<rect x="${x+.5}" y="${y(g)}" width="${bw/2-.5}" height="${y(0)-y(g)}" fill="var(--gas)"><title>${t} gas ${g.toFixed(2)} kWh</title></rect><rect x="${x+bw/2}" y="${y(e)}" width="${bw/2-.5}" height="${y(0)-y(e)}" fill="var(--elec)"><title>${t} electricity ${e.toFixed(2)} kWh</title></rect>`;
+    if(j%12===0)s+=`<text x="${x}" y="${H-5}">${t}</text>`}
+  s+=`<rect x="${L}" y="${T}" width="${bw*12}" height="${H-T-B}" fill="var(--ink)" opacity=".05"/></svg>`;
+  $('dayChart').innerHTML=s;
+  $('daySummary').innerHTML=`Gas ${d.g.toFixed(1)} kWh (${gbp(d.gc)}), of which ${d.night.toFixed(1)} kWh overnight (shaded) · Electricity ${d.e.toFixed(1)} kWh from the grid (${gbp(d.ec)}) · Total ${gbp(d.cost)}`;
+}
+
+function renderTariff(m,days){
+  const now=new Date(),r=[];
+  if(m.raw.elec)r.push(['Electricity unit rate',(rateAt(m.raw.elec.unit,now)||0).toFixed(2)+'p/kWh'],['Electricity standing charge',(rateAt(m.raw.elec.sc,now)||0).toFixed(2)+'p/day']);
+  if(m.raw.gas)r.push(['Gas unit rate',(rateAt(m.raw.gas.unit,now)||0).toFixed(2)+'p/kWh'],['Gas standing charge',(rateAt(m.raw.gas.sc,now)||0).toFixed(2)+'p/day']);
+  let h=`<p class="sub" style="margin-top:0">${esc(m.raw.elec?m.raw.elec.tariff:'')} ${esc(m.raw.gas?m.raw.gas.tariff:'')}</p><table>${r.map(x=>`<tr><td>${x[0]}</td><td class="n">${x[1]}</td></tr>`).join('')}</table>`;
+  const ok=(m.raw.alts||[]).length&&days.filter(d=>d.altN>=46);
+  if(ok&&ok.length>=7){const cur=ok.reduce((s,d)=>s+d.ec,0);
+    h+=`<p style="margin-bottom:4px"><b>Electricity on other Octopus tariffs</b>, last ${ok.length} days, same half-hours as she used:</p><table><tr><td>Flexible Octopus (now)</td><td class="n">${gbp(cur)}</td></tr>`+
+      m.raw.alts.map(a=>{const v=ok.reduce((s,d)=>s+(d.alt[a.name]||0),0);return `<tr><td>${esc(a.name)}</td><td class="n">${gbp(v)} <span class="sub">(${v<cur?'−'+gbp(cur-v).slice(1):'+'+gbp(v-cur).slice(1)})</span></td></tr>`}).join('')+
+      `</table><p class="sub">Time-of-use tariffs only pay off when the car and battery charge in their cheap hours: set the 7 kW charger to full speed on a schedule, not its slow solar or eco mode. Go needs Octopus to accept the car; Flux needs the solar installation certificate.</p>`}
+  $('tariff').innerHTML=h;
+}
+
+function renderMix(m,days){
+  if(!days.length)return;
+  const keys=new Set(days.map(d=>d.key));
+  const B=[['Midnight–6am',0,6],['6am–9am',6,9],['9am–4pm',9,16],['4pm–7pm',16,19],['7pm–midnight',19,24]];
+  const sum=(arr,f)=>arr.reduce((s,x)=>s+f(x),0);
+  const gT=sum(days,d=>d.g),eT=sum(days,d=>d.e);
+  const band=(d,a,b,key)=>{let v=0;for(let j=a*2;j<b*2;j++)v+=d[key][j]||0;return v};
+  $('bands').innerHTML='<table><tr><th>Time</th><th class="n">Gas kWh</th><th class="n">%</th><th class="n">Elec kWh</th><th class="n">%</th></tr>'+B.map(([l,a,b])=>{const g=sum(days,d=>band(d,a,b,'hhG')),e=sum(days,d=>band(d,a,b,'hhE'));return `<tr><td>${l}</td><td class="n">${g.toFixed(0)}</td><td class="n">${gT?Math.round(g/gT*100):0}%</td><td class="n">${e.toFixed(0)}</td><td class="n">${eT?Math.round(e/eT*100):0}%</td></tr>`}).join('')+'</table>';
+  const gUnit=sum(days,d=>d.gc)-days.length*((m.raw.gas&&rateAt(m.raw.gas.sc,new Date()))||0)/100;
+  const eSC=days.length*((m.raw.elec&&rateAt(m.raw.elec.sc,new Date()))||0)/100, gSC=days.length*((m.raw.gas&&rateAt(m.raw.gas.sc,new Date()))||0)/100;
+  const eUnit=sum(days,d=>d.ec)-eSC;
+  const hw=Math.min(gT,Number(cfg.baseGas||2.7)*days.length), heat=gT-hw, gp=gT?gUnit/gT:0;
+  const car=steadyBlocks(m,40).filter(b=>keys.has(dayKey(b.start)));
+  const carK=sum(car,b=>b.kwh),carC=sum(car,b=>b.cost),othK=Math.max(0,eT-carK),othC=Math.max(0,eUnit-carC);
+  const total=sum(days,d=>d.cost);
+  const rows=[['Heating (gas)',heat,heat*gp],['Car charging (likely)',carK,carC],['Other electricity',othK,othC],['Standing charges',null,eSC+gSC],['Hot water and cooking (gas, est.)',hw,hw*gp]].sort((a,b)=>b[2]-a[2]);
+  $('uses').innerHTML='<table><tr><th>Use</th><th class="n">kWh</th><th class="n">Cost</th><th class="n">%</th></tr>'+rows.map(r=>`<tr><td>${r[0]}</td><td class="n">${r[1]==null?'–':r[1].toFixed(0)}</td><td class="n">${gbp(r[2])}</td><td class="n">${total?Math.round(r[2]/total*100):0}%</td></tr>`).join('')+`</table><p class="sub">Car charging is spotted from long, steady overnight draws (${car.length} in this period). Hot water and cooking assume ${Number(cfg.baseGas||2.7)} kWh of gas a day, the level before the heating came on.</p>`;
+}
+
+function setStatus(t,busy){$('status').innerHTML=(busy?'<span class="spin"></span>':'')+t}
+async function refresh(){
+  setStatus('Updating from Octopus…',true);
+  try{const raw=await fetchAll();store.set('he_cache',raw);render(build(raw));
+    setStatus('Updated '+new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})+' · '+esc(raw.address||''));return true}
+  catch(e){const msg=(e&&e.message)||'Could not reach Octopus.';setStatus('Not updated: '+esc(/fetch|network|load/i.test(msg)?'no connection to Octopus.':msg));if(!model){$('setupErr').textContent=msg;showSetup(true)}return false}
+}
+function showSetup(on){$('setup').classList.toggle('hidden',!on);$('app').classList.toggle('hidden',on&&!model);
+  if(on){$('fKey').value=cfg.key||'';$('fAcct').value=cfg.acct||'';$('fDD').value=cfg.dd;$('fGas').value=cfg.gasFactor}}
+$('btnSettings').onclick=()=>showSetup($('setup').classList.contains('hidden'));
+$('btnSave').onclick=async()=>{cfg={key:$('fKey').value.trim(),acct:$('fAcct').value.trim().toUpperCase(),dd:Number($('fDD').value)||0,gasFactor:Number($('fGas').value)||0};
+  if(!cfg.key||!cfg.acct){$('setupErr').textContent='Enter the API key and account number.';return}
+  store.set('he_cfg',cfg);$('setupErr').textContent='';if(await refresh()){showSetup(false);$('app').classList.remove('hidden')}};
+$('btnForget').onclick=()=>{cfg=Object.assign({},DEF);store.del('he_cfg');store.del('he_cache');model=null;$('app').classList.add('hidden');showSetup(true);setStatus('Key removed from this phone.')};
+$('prevDay').onclick=()=>{const i=model.days.findIndex(d=>d.key===selDay);if(i>0){selDay=model.days[i-1].key;renderDaily(model);renderDay()}};
+$('nextDay').onclick=()=>{const i=model.days.findIndex(d=>d.key===selDay);if(i<model.days.length-1){selDay=model.days[i+1].key;renderDaily(model);renderDay()}};
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&cfg.key&&model&&Date.now()-new Date(model.raw.fetched)>15*60e3)refresh()});
+
+if(!cfg.key){setStatus('Not connected');showSetup(true)}
+else{const c=store.get('he_cache');if(c){try{render(build(c));$('app').classList.remove('hidden')}catch(e){}}
+  refresh().then(ok=>{if(ok)$('app').classList.remove('hidden')})}
+})();
+</script>
+</body>
+</html>
