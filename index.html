@@ -48,65 +48,95 @@ input{width:100%;font:inherit;padding:10px;border:1px solid var(--line);border-r
 .err{color:var(--warn);font-size:14px}
 .spin{display:inline-block;width:14px;height:14px;border:2px solid var(--muted);border-top-color:transparent;border-radius:50%;animation:s 1s linear infinite;vertical-align:-2px;margin-right:6px}
 @keyframes s{to{transform:rotate(360deg)}}
+html,body{height:100%;overflow:hidden;overscroll-behavior:none}
+#screens{height:100%}
+.screen{position:fixed;inset:0;display:none;flex-direction:column;background:var(--bg);padding:calc(env(safe-area-inset-top) + 10px) calc(env(safe-area-inset-right) + 14px) calc(env(safe-area-inset-bottom) + 10px) calc(env(safe-area-inset-left) + 14px)}
+.screen.on{display:flex}
+.top{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin:0 0 10px}
+.bar{display:flex;align-items:center;gap:8px;margin:0 0 10px;min-height:44px}
+.bar h2{margin:0;font-size:17px;flex:1;text-align:center;padding-right:60px}
+.back{background:transparent;color:var(--accent);padding:10px 8px 10px 0;font-weight:600;white-space:nowrap}
+.icon{background:var(--card);color:var(--ink);width:44px;height:44px;padding:0;font-size:20px;border-radius:12px;box-shadow:0 1px 2px rgba(0,0,0,.06)}
+.body{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;background:var(--card);border-radius:14px;padding:14px}
+.homebody{flex:1;display:flex;flex-direction:column;gap:10px;min-height:0}
+.homebody .kpis{margin:0}
+.kpi{padding:10px 12px}.kpi .v{font-size:21px}.kpi .l{font-size:12px}
+.strip{display:block;width:100%;text-align:left;background:var(--warnbg);color:var(--ink);font-size:14px;line-height:1.3;padding:10px 12px;border-radius:12px;overflow:hidden;flex-shrink:0}
+.strip b{color:var(--warn)}
+.clamp2{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.strip.ok{background:var(--okbg)}.strip.ok b{color:var(--accent)}
+.grid{flex:1;display:grid;grid-template-columns:1fr 1fr;grid-auto-rows:1fr;gap:10px;min-height:0}
+.nav{background:var(--card);color:var(--ink);border-radius:14px;box-shadow:0 1px 2px rgba(0,0,0,.06);font-weight:600;font-size:15px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;padding:6px;min-height:0}
+.ni{font-size:20px;color:var(--accent);line-height:1}
+#alertCount{color:var(--warn)}
+.clamp1{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:62vw}
 </style>
 </head>
 <body>
-<main>
-<header>
-  <div><h1>Home Energy</h1><div class="sub" id="status">Loading…</div></div>
-  <button class="ghost" id="btnSettings" aria-label="Settings">⚙︎ Settings</button>
-</header>
+<div id="screens">
 
-<section id="setup" class="card hidden">
-  <h2>Connect to Octopus</h2>
-  <p class="sub">Your key is saved only on this phone. Get it from your Octopus account on the web: Personal details → Developer settings → API access.</p>
+<section class="screen" id="s-home">
+  <header class="top">
+    <div style="min-width:0"><h1>Home Energy</h1><div class="sub clamp1" id="status">Loading…</div></div>
+    <button class="icon" data-go="settings" aria-label="Settings">⚙︎</button>
+  </header>
+  <div id="connect" class="hidden card" style="text-align:center"><p>Connect to Octopus to see the readings.</p><button data-go="settings">Connect</button></div>
+  <div id="home" class="hidden homebody">
+    <button class="strip" data-go="alerts" id="homeAlert"></button>
+    <div class="kpis" id="kpis"></div>
+    <nav class="grid">
+      <button class="nav" data-go="dd"><span class="ni">£</span>Direct Debit</button>
+      <button class="nav" data-go="save"><span class="ni">↓</span>Ways to save</button>
+      <button class="nav" data-go="daily"><span class="ni">▥</span>Cost per day</button>
+      <button class="nav" data-go="day"><span class="ni">≡</span>Day detail</button>
+      <button class="nav" data-go="bands"><span class="ni">◷</span>Time of day</button>
+      <button class="nav" data-go="uses"><span class="ni">%</span>What it's used for</button>
+      <button class="nav" data-go="tariff"><span class="ni">⇄</span>Tariffs</button>
+      <button class="nav" data-go="alerts"><span class="ni">!</span>Alerts <span id="alertCount"></span></button>
+    </nav>
+  </div>
+</section>
+
+<section class="screen" id="s-alerts"><header class="bar"><button class="back">‹ Back</button><h2>Alerts</h2></header><div class="body"><div id="alerts"></div></div></section>
+<section class="screen" id="s-dd"><header class="bar"><button class="back">‹ Back</button><h2>Suggested Direct Debit</h2></header><div class="body"><div id="ddCard"></div></div></section>
+<section class="screen" id="s-save"><header class="bar"><button class="back">‹ Back</button><h2>Ways to save</h2></header><div class="body"><div id="saveCard"></div></div></section>
+<section class="screen" id="s-daily"><header class="bar"><button class="back">‹ Back</button><h2>Cost per day, last 30 days</h2></header><div class="body">
+  <div class="legend"><span><i class="dot" style="background:var(--gas)"></i>Gas</span><span><i class="dot" style="background:var(--elec)"></i>Electricity</span></div>
+  <div id="dailyChart"></div><p class="sub">Tap a day to see it half hour by half hour.</p></div></section>
+<section class="screen" id="s-day"><header class="bar"><button class="back">‹ Back</button><h2>Day detail</h2></header><div class="body">
+  <div class="daynav"><button class="ghost" id="prevDay" aria-label="Previous day">‹ Prev</button><b id="dayTitle"></b><button class="ghost" id="nextDay" aria-label="Next day">Next ›</button></div>
+  <div class="legend"><span><i class="dot" style="background:var(--gas)"></i>Gas kWh</span><span><i class="dot" style="background:var(--elec)"></i>Electricity kWh</span><span>per half hour</span></div>
+  <div id="dayChart"></div><div id="daySummary" class="sub" style="margin-top:6px"></div></div></section>
+<section class="screen" id="s-bands"><header class="bar"><button class="back">‹ Back</button><h2>Time of day, last 30 days</h2></header><div class="body"><div id="bands"></div></div></section>
+<section class="screen" id="s-uses"><header class="bar"><button class="back">‹ Back</button><h2>What it's used for</h2></header><div class="body"><div id="uses"></div></div></section>
+<section class="screen" id="s-tariff"><header class="bar"><button class="back">‹ Back</button><h2>Tariffs</h2></header><div class="body"><div id="tariff"></div>
+  <p class="sub" id="dataNote"></p><p class="sub">Octopus publishes smart-meter readings once a day, and gas usually a day after electricity, so the latest day can be up to two days old. Costs include VAT and standing charges.</p></div></section>
+
+<section class="screen" id="s-settings"><header class="bar"><button class="back">‹ Back</button><h2>Settings</h2></header><div class="body">
+  <p class="sub">Saved only on this phone. The API key is on the Octopus website: Personal details → Developer settings → API access.</p>
   <label for="fKey">API key</label>
   <input id="fKey" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="sk_live_…">
   <label for="fAcct">Account number</label>
   <input id="fAcct" autocapitalize="characters" placeholder="A-1234567A">
   <label for="fDD">Monthly Direct Debit (£)</label>
   <input id="fDD" type="number" inputmode="decimal" step="1">
-  <label for="fGas">Gas: kWh per m³ (from your bill; 0 if the meter reports kWh)</label>
+  <label for="fBal">Account balance from the latest bill (£, minus if owed)</label>
+  <input id="fBal" type="number" inputmode="decimal" step="0.01" placeholder="-239.65">
+  <label for="fTemp">Thermostat setting (°C)</label>
+  <input id="fTemp" type="number" inputmode="decimal" step="0.5">
+  <label for="fGas">Gas: kWh per m³ (from the bill; 0 if the meter reports kWh)</label>
   <input id="fGas" type="number" inputmode="decimal" step="0.01">
   <div class="row" style="margin-top:14px"><button id="btnSave">Save and load</button><button class="ghost" id="btnForget">Forget key</button></div>
   <p class="err" id="setupErr"></p>
-</section>
+</div></section>
 
-<div id="app" class="hidden">
-  <div id="alerts"></div>
-  <div class="kpis" id="kpis"></div>
-  <section class="card">
-    <h2>Cost per day, last 30 days</h2>
-    <div class="legend"><span><i class="dot" style="background:var(--gas)"></i>Gas</span><span><i class="dot" style="background:var(--elec)"></i>Electricity</span><span>Tap a day for detail</span></div>
-    <div id="dailyChart"></div>
-  </section>
-  <section class="card">
-    <h2>When it's used, last 30 days</h2>
-    <div id="bands"></div>
-  </section>
-  <section class="card">
-    <h2>What it's used for, last 30 days</h2>
-    <div id="uses"></div>
-  </section>
-  <section class="card">
-    <div class="daynav"><button class="ghost" id="prevDay" aria-label="Previous day">‹</button><h2 id="dayTitle" style="margin:0"></h2><button class="ghost" id="nextDay" aria-label="Next day">›</button></div>
-    <div class="legend"><span><i class="dot" style="background:var(--gas)"></i>Gas kWh</span><span><i class="dot" style="background:var(--elec)"></i>Electricity kWh</span><span>per half hour</span></div>
-    <div id="dayChart"></div>
-    <div id="daySummary" class="sub" style="margin-top:6px"></div>
-  </section>
-  <section class="card">
-    <h2>Tariff</h2>
-    <div id="tariff"></div>
-  </section>
-  <p class="sub">Octopus publishes smart-meter readings about a day late, so today and yesterday may be incomplete. Costs include VAT and standing charges and are estimates until the bill arrives.</p>
 </div>
-</main>
 
 <script>
 (function(){
 'use strict';
 const API='https://api.octopus.energy/v1';
-const DEF={key:'',acct:'',dd:105,gasFactor:11.36};
+const DEF={key:'',acct:'',dd:105,gasFactor:11.36,bal:0,baseGas:2.7,temp:21};
 const TZ='Europe/London';
 const $=id=>document.getElementById(id);
 const store={get(k){try{return JSON.parse(localStorage.getItem(k))}catch(e){return null}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}},del(k){try{localStorage.removeItem(k)}catch(e){}}};
@@ -119,7 +149,7 @@ const dayKey=t=>dayFmt.format(t);
 const hm=t=>hourFmt.format(t);
 const hourOf=t=>parseInt(hm(t),10);
 const niceDay=k=>{const d=new Date(k+'T12:00:00Z');return d.toLocaleDateString('en-GB',{weekday:'short',day:'numeric',month:'short',timeZone:'UTC'})};
-const gbp=v=>(v<0?'−':'')+'£'+Math.abs(v).toFixed(2);
+const gbp=v=>(v<0?'−':'')+'£'+Math.abs(v).toLocaleString('en-GB',{minimumFractionDigits:2,maximumFractionDigits:2});
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
 async function get(url,auth){
@@ -145,13 +175,14 @@ async function fetchAll(){
   if(!prop) throw new Error('No property found on this account.');
   const emp=(prop.electricity_meter_points||[]).find(m=>!m.is_export);
   const gmp=(prop.gas_meter_points||[])[0];
-  const from=new Date(Date.now()-36*864e5);from.setUTCHours(0,0,0,0);
+  const from=new Date(Date.now()-400*864e5);from.setUTCHours(0,0,0,0);
   const pf='period_from='+from.toISOString();
+  const from36=new Date(Date.now()-36*864e5);from36.setUTCHours(0,0,0,0);const pf36='period_from='+from36.toISOString();
   const res={fetched:new Date().toISOString(),from:from.toISOString(),address:prop.address_line_1,elec:null,gas:null};
   const jobs=[];
   if(emp){
     const ag=current(emp.agreements), tc=ag.tariff_code, pc=productOf(tc), serial=emp.meters[emp.meters.length-1].serial_number;
-    res.elec={mpan:emp.mpan,serial,tariff:tc,region:tc.slice(-1)};
+    res.elec={mpan:emp.mpan,serial,tariff:tc,region:tc.slice(-1),eac:emp.consumption_standard};
     jobs.push(get(`${API}/electricity-meter-points/${emp.mpan}/meters/${serial}/consumption/?${pf}&page_size=25000&order_by=period`,true).then(v=>res.elec.hh=v.sort((a,b)=>Date.parse(a.interval_start)-Date.parse(b.interval_start))));
     jobs.push(get(`${API}/products/${pc}/electricity-tariffs/${tc}/standard-unit-rates/?${pf}&page_size=1500`).then(v=>res.elec.unit=ddOnly(v)));
     jobs.push(get(`${API}/products/${pc}/electricity-tariffs/${tc}/standing-charges/?${pf}&page_size=1500`).then(v=>res.elec.sc=ddOnly(v)));
@@ -160,13 +191,13 @@ async function fetchAll(){
       res.alts=[];
       for(const [name,re] of want){const p=ps.find(x=>re.test(x.code));if(!p)continue;
         const atc=`E-1R-${p.code}-${res.elec.region}`;
-        try{const [u,s]=await Promise.all([get(`${API}/products/${p.code}/electricity-tariffs/${atc}/standard-unit-rates/?${pf}&page_size=1500`),get(`${API}/products/${p.code}/electricity-tariffs/${atc}/standing-charges/?${pf}&page_size=1500`)]);
+        try{const [u,s]=await Promise.all([get(`${API}/products/${p.code}/electricity-tariffs/${atc}/standard-unit-rates/?${pf36}&page_size=1500`),get(`${API}/products/${p.code}/electricity-tariffs/${atc}/standing-charges/?${pf36}&page_size=1500`)]);
           res.alts.push({name,code:p.code,unit:ddOnly(u),sc:ddOnly(s)})}catch(e){}}
     }).catch(()=>{}));
   }
   if(gmp){
     const ag=current(gmp.agreements), tc=ag.tariff_code, pc=productOf(tc), serial=gmp.meters[gmp.meters.length-1].serial_number;
-    res.gas={mprn:gmp.mprn,serial,tariff:tc};
+    res.gas={mprn:gmp.mprn,serial,tariff:tc,eac:gmp.consumption_standard};
     jobs.push(get(`${API}/gas-meter-points/${gmp.mprn}/meters/${serial}/consumption/?${pf}&page_size=25000&order_by=period`,true).then(v=>res.gas.hh=v.sort((a,b)=>Date.parse(a.interval_start)-Date.parse(b.interval_start))));
     jobs.push(get(`${API}/products/${pc}/gas-tariffs/${tc}/standard-unit-rates/?${pf}&page_size=1500`).then(v=>res.gas.unit=ddOnly(v)));
     jobs.push(get(`${API}/products/${pc}/gas-tariffs/${tc}/standing-charges/?${pf}&page_size=1500`).then(v=>res.gas.sc=ddOnly(v)));
@@ -222,24 +253,28 @@ function render(m){
   if(cfg.dd>0&&proj>cfg.dd*1.1) al.push(`<b>Direct Debit too low.</b> At last week's rate this month costs about ${gbp(proj)}, against a Direct Debit of ${gbp(Number(cfg.dd))}.`);
   if(!al.length) al.push('<span class="alert-ok"><b>Nothing unusual</b> in the latest readings.</span>');
   $('alerts').innerHTML=al.map(a=>`<div class="alert${a.includes('alert-ok')?' ok':''}">${a}</div>`).join('');
+  const real=al.filter(a=>!a.includes('alert-ok'));
+  $('homeAlert').innerHTML='<span class="clamp2">'+(real.length?(real.length>1?`<span class="sub">1 of ${real.length} · </span>`:'')+real[0]:al[0])+'</span>';
+  $('homeAlert').classList.toggle('ok',!real.length);
+  $('alertCount').textContent=real.length?`(${real.length})`:'';
 
   // kpis
   const k=(l,v,s)=>`<div class="kpi"><div class="l">${l}</div><div class="v">${v}</div><div class="l">${s}</div></div>`;
   $('kpis').innerHTML=
     k('Latest full day',gbp(last.cost),`${niceDay(last.key)} · gas ${last.g.toFixed(0)} kWh · elec ${last.e.toFixed(1)} kWh`)+
     k('Last 7 days',gbp(last7.reduce((s,d)=>s+d.cost,0)),`avg ${gbp(daily7)} a day`)+
-    k('This month so far',gbp(mtdCost),`${mtd.length} days of readings`)+
-    k('Month at this rate',gbp(proj),cfg.dd>0?`Direct Debit ${gbp(Number(cfg.dd))}`:'');
+    k('Month at this rate',gbp(proj),cfg.dd>0?`Direct Debit ${gbp(Number(cfg.dd))}`:'')+`<div class="kpi" id="kpiDD"></div>`;
 
   renderDaily(m);
   if(!selDay||!m.days.find(d=>d.key===selDay)) selDay=last.key;
   renderDay();
   renderTariff(m,done.slice(-30));
   renderMix(m,done.slice(-30));
+  renderDD(m,done);
 }
 
 function renderDaily(m){
-  const ds=m.days.slice(-30), W=600,H=220,L=34,B=24,T=8, max=Math.max(1,...ds.map(d=>d.cost));
+  const ds=m.days.slice(-30), W=600,H=420,L=34,B=24,T=8, max=Math.max(1,...ds.map(d=>d.cost));
   const step=Math.ceil(max/4/5)*5||1, top=step*4, bw=(W-L)/ds.length, y=v=>T+(H-T-B)*(1-v/top);
   let s=`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Cost per day for the last 30 days">`;
   for(let i=0;i<=4;i++){const v=step*i;s+=`<line x1="${L}" x2="${W}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)"/><text x="${L-4}" y="${y(v)+4}" text-anchor="end">£${v}</text>`}
@@ -247,7 +282,7 @@ function renderDaily(m){
     s+=`<g class="bar" data-day="${d.key}" opacity="${d.complete?1:.45}"><rect x="${x}" y="${y(d.gc)}" width="${w}" height="${y(0)-y(d.gc)}" fill="var(--gas)"/><rect x="${x}" y="${y(d.gc+d.ec)}" width="${w}" height="${y(d.gc)-y(d.gc+d.ec)}" fill="var(--elec)"/><rect x="${x-1}" y="${T}" width="${bw}" height="${H-T-B}" fill="transparent" stroke="${sel?'var(--ink)':'none'}" stroke-width="1"/><title>${niceDay(d.key)}: ${gbp(d.cost)} (gas ${gbp(d.gc)}, electricity ${gbp(d.ec)})</title></g>`;
     if(i%7===0)s+=`<text x="${x}" y="${H-6}">${niceDay(d.key).replace(/^\w+ /,'')}</text>`});
   s+='</svg>';$('dailyChart').innerHTML=s;
-  $('dailyChart').querySelectorAll('.bar').forEach(g=>g.addEventListener('click',()=>{selDay=g.dataset.day;renderDaily(model);renderDay()}));
+  $('dailyChart').querySelectorAll('.bar').forEach(g=>g.addEventListener('click',()=>{selDay=g.dataset.day;renderDaily(model);renderDay();go('day')}));
 }
 
 function renderDay(){
@@ -298,27 +333,81 @@ function renderMix(m,days){
   $('uses').innerHTML='<table><tr><th>Use</th><th class="n">kWh</th><th class="n">Cost</th><th class="n">%</th></tr>'+rows.map(r=>`<tr><td>${r[0]}</td><td class="n">${r[1]==null?'–':r[1].toFixed(0)}</td><td class="n">${gbp(r[2])}</td><td class="n">${total?Math.round(r[2]/total*100):0}%</td></tr>`).join('')+`</table><p class="sub">Car charging is spotted from long, steady overnight draws (${car.length} in this period). Hot water and cooking assume ${Number(cfg.baseGas||2.7)} kWh of gas a day, the level before the heating came on.</p>`;
 }
 
+// Typical heating degree days per month for northern England (base 15.5°C), approximate. Used to turn
+// recent heating use into a whole-year figure.
+const HDD=[340,300,280,210,140,80,45,50,90,170,260,320], HDD_YEAR=HDD.reduce((a,b)=>a+b,0);
+const hddDay=k=>{const y=+k.slice(0,4),mo=+k.slice(5,7);return HDD[mo-1]/new Date(Date.UTC(y,mo,0)).getUTCDate()};
+function renderDD(m,done){
+  const now=new Date(),sum=(a,f)=>a.reduce((s,x)=>s+f(x),0);
+  const ge=m.raw.gas?(rateAt(m.raw.gas.unit,now)||0)/100:0, gs=m.raw.gas?(rateAt(m.raw.gas.sc,now)||0)/100:0;
+  const ee=m.raw.elec?(rateAt(m.raw.elec.unit,now)||0)/100:0, es=m.raw.elec?(rateAt(m.raw.elec.sc,now)||0)/100:0;
+  const base=Number(cfg.baseGas||2.7), win=done.slice(-28);
+  if(win.length<14){$('ddCard').innerHTML='<p class="sub">Needs at least two weeks of readings.</p>';$('saveCard').innerHTML='';return}
+  const heatWin=sum(win,d=>Math.max(0,d.g-base)), share=sum(win,d=>hddDay(d.key))/HDD_YEAR;
+  const aHeat=share>0?heatWin/share:0, aGas=aHeat+base*365;
+  const eDays=done.slice(-365), aElec=eDays.length?sum(eDays,d=>d.e)/eDays.length*365:0;
+  const year=aGas*ge+365*gs+aElec*ee+365*es, bal=Number(cfg.bal)||0;
+  const r5=v=>Math.ceil(v/5)*5, sugg=r5(Math.max(0,(year-bal)/12));
+  const eac=(m.raw.gas&&m.raw.gas.eac?m.raw.gas.eac*ge+365*gs:0)+(m.raw.elec&&m.raw.elec.eac?m.raw.elec.eac*ee+365*es:0);
+  $('kpiDD').innerHTML=`<div class="l">Suggested Direct Debit</div><div class="v">£${sugg}</div><div class="l">a month</div>`;
+  $('ddCard').innerHTML=`<div class="kpis" style="margin:0 0 8px"><div class="kpi" style="box-shadow:none;background:var(--bg)"><div class="l">Suggested</div><div class="v">£${sugg}</div><div class="l">a month</div></div><div class="kpi" style="box-shadow:none;background:var(--bg)"><div class="l">Paying now</div><div class="v">${gbp(Number(cfg.dd)||0)}</div><div class="l">${sugg>(Number(cfg.dd)||0)?'short by '+gbp(sugg-(Number(cfg.dd)||0))+' a month':'enough'}</div></div></div>
+  <table><tr><td>Gas, next 12 months at ${Number(cfg.temp)}°C</td><td class="n">${Math.round(aGas).toLocaleString('en-GB')} kWh · ${gbp(aGas*ge+365*gs)}</td></tr>
+  <tr><td>Electricity from the grid</td><td class="n">${Math.round(aElec).toLocaleString('en-GB')} kWh · ${gbp(aElec*ee+365*es)}</td></tr>
+  <tr><td>Year in total</td><td class="n">${gbp(year)}</td></tr>
+  <tr><td>Balance to ${bal<0?'clear':'use up'} over 12 months</td><td class="n">${gbp(-bal)}</td></tr>
+  ${eac?`<tr><td>Octopus's own yearly estimate</td><td class="n">${gbp(eac)} (${gbp(eac/12)} a month)</td></tr>`:''}</table>
+  <p class="sub">Gas is projected from the last ${win.length} days of heating, scaled to a full year using a typical northern England weather pattern, so a cold or mild spell moves it. Electricity uses the average of the ${eDays.length} days of readings so far, which covers ${eDays.length>=330?'a full year':'only part of the year'}. Update the balance in Settings after each bill.</p>`;
+
+  // savings, starting from the thermostat setting in Settings
+  const ys=[];const heatCost=aHeat*ge;
+  ys.push([`Thermostat ${Number(cfg.temp)-1}°C instead of ${Number(cfg.temp)}°C`,heatCost*0.10,'About 10% of heating per degree (Energy Saving Trust figure)']);
+  ys.push([`Thermostat ${Number(cfg.temp)-2}°C instead of ${Number(cfg.temp)}°C`,heatCost*0.20,'Two degrees, about 20% of heating']);
+  const nightW=sum(win,d=>{let v=0;for(let j=0;j<12;j++)v+=d.hhG[j]||0;return v}), dayW=sum(win,d=>{let v=0;for(let j=18;j<32;j++)v+=d.hhG[j]||0;return v});
+  if(heatWin>0){ys.push(['Heating off midnight–6am',heatCost*Math.min(1,nightW/heatWin),`${Math.round(nightW/heatWin*100)}% of recent heating ran overnight`]);
+    ys.push(['Heating off 9am–4pm when nobody is in',heatCost*Math.min(1,dayW/heatWin),`${Math.round(dayW/heatWin*100)}% of recent heating ran in the working day. Only if the house is empty`]);}
+  const flux=(m.raw.alts||[]).find(a=>a.name==='Octopus Flux');
+  const car=steadyBlocks(m,28);
+  if(flux&&car.length){const cheap=Math.min(...flux.unit.map(r=>r.value_inc_vat))/100,kwh=sum(car,b=>b.kwh);
+    ys.push(['Car charged at full speed in Flux cheap hours',Math.max(0,(sum(car,b=>b.cost)-kwh*cheap))*365/28,`${car.length} slow charges in the last 4 weeks; needs Flux (solar certificate)`])}
+  ys.sort((a,b)=>b[1]-a[1]);
+  $('saveCard').innerHTML='<table><tr><th>Change</th><th class="n">A year</th><th class="n">A month</th></tr>'+ys.map(y=>`<tr><td>${y[0]}<div class="sub">${y[2]}</div></td><td class="n">${gbp(y[1])}</td><td class="n">${gbp(y[1]/12)}</td></tr>`).join('')+'</table><p class="sub">Savings overlap, so they don\'t simply add up. For example, a lower thermostat also cuts the overnight and daytime figures. Turning the boiler\'s flow temperature down to about 60°C is another free saving these figures don\'t include.</p>';
+}
+
 function setStatus(t,busy){$('status').innerHTML=(busy?'<span class="spin"></span>':'')+t}
 async function refresh(){
   setStatus('Updating from Octopus…',true);
   try{const raw=await fetchAll();store.set('he_cache',raw);render(build(raw));
-    setStatus('Updated '+new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})+' · '+esc(raw.address||''));return true}
-  catch(e){const msg=(e&&e.message)||'Could not reach Octopus.';setStatus('Not updated: '+esc(/fetch|network|load/i.test(msg)?'no connection to Octopus.':msg));if(!model){$('setupErr').textContent=msg;showSetup(true)}return false}
+    const lastT=a=>a&&a.length?new Date(a[a.length-1].interval_end).toLocaleString('en-GB',{weekday:'short',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit',timeZone:TZ}):'none';
+    const lastD=a=>a&&a.length?new Date(Date.parse(a[a.length-1].interval_end)-1).toLocaleDateString('en-GB',{day:'numeric',month:'short',timeZone:TZ}):'–';
+    setStatus('Updated '+new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})+' · data to '+lastD(raw.gas&&raw.gas.hh));
+    $('dataNote').textContent='Latest readings from Octopus: gas to '+lastT(raw.gas&&raw.gas.hh)+', electricity to '+lastT(raw.elec&&raw.elec.hh)+'.';return true}
+  catch(e){const msg=(e&&e.message)||'Could not reach Octopus.';setStatus('Not updated: '+esc(/fetch|network|load/i.test(msg)?'no connection to Octopus.':msg));$('setupErr').textContent=msg;return false}
 }
-function showSetup(on){$('setup').classList.toggle('hidden',!on);$('app').classList.toggle('hidden',on&&!model);
-  if(on){$('fKey').value=cfg.key||'';$('fAcct').value=cfg.acct||'';$('fDD').value=cfg.dd;$('fGas').value=cfg.gasFactor}}
-$('btnSettings').onclick=()=>showSetup($('setup').classList.contains('hidden'));
-$('btnSave').onclick=async()=>{cfg={key:$('fKey').value.trim(),acct:$('fAcct').value.trim().toUpperCase(),dd:Number($('fDD').value)||0,gasFactor:Number($('fGas').value)||0};
+function fillSettings(){$('fKey').value=cfg.key||'';$('fAcct').value=cfg.acct||'';$('fDD').value=cfg.dd;$('fGas').value=cfg.gasFactor;$('fBal').value=cfg.bal;$('fTemp').value=cfg.temp}
+function showSetup(){go('settings')}
+function showHome(){$('connect').classList.toggle('hidden',!!model);$('home').classList.toggle('hidden',!model)}
+// screens: one per hash, so the phone's own back button works too
+function show(){const id=(location.hash||'').slice(1)||'home';const el=$('s-'+id)||$('s-home');
+  document.querySelectorAll('.screen').forEach(x=>x.classList.toggle('on',x===el));
+  if(el.id==='s-settings')fillSettings();if(el.id==='s-day'&&model)renderDay();const b=el.querySelector('.body');if(b)b.scrollTop=0}
+let depth=0;
+function go(id){if(id==='home'){back();return}depth++;location.hash=id}
+function back(){if(depth>0){depth--;history.back()}else{history.replaceState(null,'',location.pathname+location.search);show()}}
+window.addEventListener('hashchange',()=>{if(!location.hash)depth=0;show()});
+document.addEventListener('click',e=>{const t=e.target.closest('[data-go]');if(t){go(t.dataset.go);return}if(e.target.closest('.back'))back()});
+$('btnSave').onclick=async()=>{cfg=Object.assign({},DEF,{key:$('fKey').value.trim(),acct:$('fAcct').value.trim().toUpperCase(),dd:Number($('fDD').value)||0,gasFactor:Number($('fGas').value)||0,bal:Number($('fBal').value)||0,temp:Number($('fTemp').value)||21});
   if(!cfg.key||!cfg.acct){$('setupErr').textContent='Enter the API key and account number.';return}
-  store.set('he_cfg',cfg);$('setupErr').textContent='';if(await refresh()){showSetup(false);$('app').classList.remove('hidden')}};
-$('btnForget').onclick=()=>{cfg=Object.assign({},DEF);store.del('he_cfg');store.del('he_cache');model=null;$('app').classList.add('hidden');showSetup(true);setStatus('Key removed from this phone.')};
+  store.set('he_cfg',cfg);$('setupErr').textContent='Loading…';if(await refresh()){$('setupErr').textContent='';showHome();back()}};
+$('btnForget').onclick=()=>{cfg=Object.assign({},DEF);store.del('he_cfg');store.del('he_cache');model=null;fillSettings();showHome();setStatus('Key removed from this phone.')};
 $('prevDay').onclick=()=>{const i=model.days.findIndex(d=>d.key===selDay);if(i>0){selDay=model.days[i-1].key;renderDaily(model);renderDay()}};
 $('nextDay').onclick=()=>{const i=model.days.findIndex(d=>d.key===selDay);if(i<model.days.length-1){selDay=model.days[i+1].key;renderDaily(model);renderDay()}};
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&cfg.key&&model&&Date.now()-new Date(model.raw.fetched)>15*60e3)refresh()});
 
-if(!cfg.key){setStatus('Not connected');showSetup(true)}
-else{const c=store.get('he_cache');if(c){try{render(build(c));$('app').classList.remove('hidden')}catch(e){}}
-  refresh().then(ok=>{if(ok)$('app').classList.remove('hidden')})}
+if(location.hash){history.replaceState(null,'',location.pathname+location.search)}
+show();
+if(!cfg.key){setStatus('Not connected');showHome()}
+else{const c=store.get('he_cache');if(c){try{render(build(c))}catch(e){}}showHome();
+  refresh().then(()=>showHome())}
 })();
 </script>
 </body>
