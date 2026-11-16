@@ -311,16 +311,17 @@ function renderDay(){
 }
 
 function priceSmart(m,days,unit,sc){
+  const rf=typeof unit==='function'?unit:(t=>rateAt(unit,t)),sf=typeof sc==='function'?sc:(t=>rateAt(sc,t));
   // Last N complete days on a tariff: as used, and with (a) the car charged at 7 kW in the cheapest night half-hours
   // and (b) the house battery (cfg.batt usable kWh) charged at the night's cheapest rate to cover dearer half-hours.
   const keys=new Set(days.map(d=>d.key));
   const car=steadyBlocks(m,45).filter(b=>keys.has(dayKey(b.start)));const carSet=new Set();car.forEach(b=>b.items.forEach(i=>carSet.add(i.interval_start)));
   const rt=[];let miss=0;
-  for(const r of (m.raw.elec.hh||[])){const t=new Date(r.interval_start),day=dayKey(t);if(!keys.has(day))continue;const p=rateAt(unit,t);if(p==null){miss++;continue}
+  for(const r of (m.raw.elec.hh||[])){const t=new Date(r.interval_start),day=dayKey(t);if(!keys.has(day))continue;const p=rf(t);if(p==null){miss++;continue}
     rt.push({s:r.interval_start,t:t.getTime(),k:r.consumption,day,h:hourOf(t),p,car:carSet.has(r.interval_start)})}
   const byS=new Map(rt.map(x=>[x.s,x]));
   if(!rt.length||miss>rt.length*0.1)return null;
-  const asis=rt.reduce((s,x)=>s+x.k*x.p/100,0)+days.reduce((s,d)=>s+(rateAt(sc,new Date(d.key+'T12:00:00Z'))||0)/100,0);
+  const asis=rt.reduce((s,x)=>s+x.k*x.p/100,0)+days.reduce((s,d)=>s+(sf(new Date(d.key+'T12:00:00Z'))||0)/100,0);
   const carNow=rt.filter(x=>x.car).reduce((s,x)=>s+x.k*x.p/100,0);let carNew=0;
   for(const b of car){const d0=Date.parse(dayKey(b.start)+'T00:00:00Z');const kwh=b.items.reduce((s,i)=>s+(byS.has(i.interval_start)?byS.get(i.interval_start).k:0),0);
     const win=rt.filter(x=>x.t>=d0-2*36e5&&x.t<d0+34*36e5&&(x.h>=22||x.h<7)).map(x=>x.p).sort((a,c)=>a-c);if(!win.length)continue;
@@ -349,24 +350,29 @@ function renderTariff(m,days){
     h+=`<h3>Gas, last ${n} days</h3><table><tr><td>Flexible Octopus (now)</td><td class="n">${gbp(flexG)}</td></tr>`+
       (m.raw.fixes||[]).filter(f=>f.gu!=null).map(f=>{const v=(gT*f.gu+n*(f.gs||0))/100;return `<tr><td>${esc(f.name)} <span class="sub">${f.gu.toFixed(2)}p/kWh</span></td><td class="n">${gbp(v)} <span class="sub">(${v<flexG?'−':'+'}${gbp(Math.abs(v-flexG)).slice(1)})</span></td></tr>`}).join('')+
       `</table><p class="sub">Fixed prices are today's offers. Flexible follows the Ofgem price cap, which suppliers forecast to rise by roughly 20–28% on 1 January 2027. Ofgem confirms it by 25 November. If it rises that much, a fix at today's price could work out cheaper from January.</p>`}
-  h+=`<h3>Other suppliers to compare</h3>
-  <p class="sub" style="margin-top:0">Rates from published comparisons, mid-November 2026. They vary by region and change often, so check before switching. EV tariffs may also check the car's registration.</p>
-  <table>
-  <tr><th colspan="2">EV tariffs (cheap overnight rate for the whole house)</th></tr>
-  <tr><td>EDF GoElectric</td><td class="n">≈7p, 11pm–6am</td></tr>
-  <tr><td>E.ON Next Drive Smart</td><td class="n">≈7–8p, midnight–6am</td></tr>
-  <tr><td>So Energy EV</td><td class="n">≈6.5p, midnight–5am</td></tr>
-  <tr><td>British Gas EV Power</td><td class="n">≈9p, midnight–5am</td></tr>
-  <tr><td>OVO Charge Anytime</td><td class="n">car only, ≈7–14p</td></tr>
-  <tr><th colspan="2">Solar export (paid per kWh sent to the grid)</th></tr>
-  <tr><td>EDF Export 12m (EDF customers)</td><td class="n">≈15p</td></tr>
-  <tr><td>E.ON Next Export Exclusive (E.ON customers)</td><td class="n">≈13–16.5p</td></tr>
-  <tr><td>Scottish Power SmartGen (any supplier)</td><td class="n">≈12p</td></tr>
-  <tr><td>Outgoing Octopus (Octopus customers)</td><td class="n">12p</td></tr>
-  <tr><th colspan="2">Gas</th></tr>
-  <tr><td>British Gas Cap Tracker / EDF Simply Tracker</td><td class="n">≈£50 a year below the cap (dual fuel)</td></tr>
-  <tr><td>E.ON Next and EDF fixes</td><td class="n">often the cheapest fixes; compare after 25 Nov</td></tr>
-  </table>`;
+  // Other suppliers' EV tariffs, priced on her own half-hourly readings. Published rates (VAT included) from
+  // comparison sites, mid-November 2026; regional prices vary, so these are estimates.
+  const EXT=[
+    {nm:'EDF GoElectric',off:6.99,a:23,b:6,peak:32.0,sc:50},
+    {nm:'E.ON Next Drive Smart',off:6.5,a:0,b:6,peak:29.12,sc:60},
+    {nm:'So Energy So EV',off:7.14,a:0,b:5,peak:41.5,sc:54},
+    {nm:'British Gas EV Power',off:9.5,a:0,b:5,peak:36.5,sc:50}];
+  if(m.raw.elec&&n>=14){const base=priceSmart(m,days,m.raw.elec.unit,m.raw.elec.sc);
+    const rows=EXT.map(x=>{const fn=t=>{const hr=hourOf(t);return (x.a<x.b?(hr>=x.a&&hr<x.b):(hr>=x.a||hr<x.b))?x.off:x.peak};return {x,v:priceSmart(m,days,fn,()=>x.sc)}}).filter(r=>r.v);
+    h+=`<h3>Other suppliers' EV tariffs, last ${n} days‡</h3><table><tr><th>Tariff</th><th class="n">As used</th><th class="n">Cheap-hours charging†</th></tr>`+
+      (base?`<tr><td>Flexible Octopus (now)</td><td class="n">${gbp(base.asis)}</td><td class="n">${gbp(base.asis)}</td></tr>`:'')+
+      rows.map(r=>`<tr><td>${esc(r.x.nm)}*<div class="sub">${r.x.off}p ${String(r.x.a).padStart(2,'0')}:00–${String(r.x.b).padStart(2,'0')}:00 · ${r.x.peak}p other times · ${r.x.sc}p/day</div></td><td class="n">${gbp(r.v.asis)}</td><td class="n"><b>${gbp(r.v.smart)}</b>${base?`<div class="sub">${r.v.smart<base.asis?'saves '+gbp(base.asis-r.v.smart):'+'+gbp(r.v.smart-base.asis).slice(1)}</div>`:''}</td></tr>`).join('')+
+      `</table><p class="sub">* EV tariffs may need a UK-registered car.<br>‡ Published prices from comparison sites, mid-November 2026. Prices vary by region and change often, and some may still include 5% VAT, which is 0% on electricity at the moment. Check a quote for the postcode before switching.</p>`}
+  if(m.raw.gas&&n>=14){const gu=(rateAt(m.raw.gas.unit,now)||0),gs=(rateAt(m.raw.gas.sc,now)||0);const flexG=(gT*gu+n*gs)/100;
+    h+=`<h3>Gas from other suppliers, last ${n} days</h3><table><tr><td>Flexible Octopus (now, at the price cap)</td><td class="n">${gbp(flexG)}</td></tr>
+    <tr><td>British Gas Cap Tracker / EDF Simply Tracker<div class="sub">about £25 a year below the cap on gas</div></td><td class="n">${gbp(flexG-25*n/365)}</td></tr></table>
+    <p class="sub">Uswitch says no fixed deal currently beats the October price cap, but fixes may beat the January cap if the forecast rise happens. Compare again after Ofgem's announcement on 25 November.</p>`}
+  h+=`<h3>Solar export</h3><table>
+  <tr><td>EDF Export 12m (EDF customers)</td><td class="n">≈15p/kWh</td></tr>
+  <tr><td>E.ON Next Export Exclusive (E.ON customers)</td><td class="n">≈13–16.5p/kWh</td></tr>
+  <tr><td>Scottish Power SmartGen (any supplier)</td><td class="n">≈12p/kWh</td></tr>
+  <tr><td>Outgoing Octopus (Octopus customers)</td><td class="n">12p/kWh</td></tr></table>
+  <p class="sub">Export payments need the solar installation certificate. Her readings don't include an export meter, so export income isn't counted in the costs above.</p>`;
   $('tariff').innerHTML=h;
 }
 
