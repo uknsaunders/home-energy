@@ -128,6 +128,8 @@ html,body{height:100%;overflow:hidden;overscroll-behavior:none}
   <input id="fTemp" type="number" inputmode="decimal" step="0.5">
   <label for="fBatt">House battery usable capacity (kWh)</label>
   <input id="fBatt" type="number" inputmode="decimal" step="0.5">
+  <label for="fOut">Hours a week the house is empty in the day</label>
+  <input id="fOut" type="number" inputmode="decimal" step="1">
   <label for="fLoc">Weather location (latitude, longitude)</label>
   <input id="fLoc" autocomplete="off" placeholder="53.65, -1.78">
   <label for="fGas">Gas: kWh per m³ (from the bill; 0 if the meter reports kWh)</label>
@@ -142,7 +144,7 @@ html,body{height:100%;overflow:hidden;overscroll-behavior:none}
 (function(){
 'use strict';
 const API='https://api.octopus.energy/v1';
-const DEF={key:'',acct:'',dd:105,gasFactor:11.36,bal:0,baseGas:2.7,temp:21,batt:9,loc:'53.65,-1.78'};
+const DEF={key:'',acct:'',dd:105,gasFactor:11.36,bal:0,baseGas:2.7,temp:21,batt:9,loc:'53.65,-1.78',hoursOut:6};
 const TZ='Europe/London';
 const $=id=>document.getElementById(id);
 const store={get(k){try{return JSON.parse(localStorage.getItem(k))}catch(e){return null}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}},del(k){try{localStorage.removeItem(k)}catch(e){}}};
@@ -513,6 +515,13 @@ function renderMix(m,days){
 // recent heating use into a whole-year figure.
 const HDD=[340,300,280,210,140,80,45,50,90,170,260,320], HDD_YEAR=HDD.reduce((a,b)=>a+b,0);
 const hddDay=k=>{const y=+k.slice(0,4),mo=+k.slice(5,7);return HDD[mo-1]/new Date(Date.UTC(y,mo,0)).getUTCDate()};
+function compareHeaters(m,win,ge,ee){
+  const sum=(a,f)=>a.reduce((s,x)=>s+f(x),0);
+  const dayG=sum(win,d=>{let v=0;for(let j=18;j<32;j++)v+=d.hhG[j]||0;return v})/(win.length*7);
+  const rows=[['Gas central heating, whole house (her daytime average)',dayG*ge],['Dyson Hot+Cool on full heat (about 2 kW)',2*ee],['Dyson on its thermostat in a small room (about 1 kW average)',1*ee],['Heated throw or electric blanket (about 0.1 kW)',0.1*ee]];
+  return `<h3>Cost per hour to keep warm</h3><table>${rows.map(r=>`<tr><td>${r[0]}</td><td class="n">${(r[1]*100).toFixed(0)}p</td></tr>`).join('')}</table>
+  <p class="sub">Electricity costs about ${(ee/ge).toFixed(1)} times as much per unit as gas, so the Dyson is only cheaper if the central heating is turned right down and she heats just one room. A heated throw at the desk is the cheapest way to stay warm.</p>`;
+}
 function renderDD(m,done){
   const now=new Date(),sum=(a,f)=>a.reduce((s,x)=>s+f(x),0);
   const ge=m.raw.gas?(rateAt(m.raw.gas.unit,now)||0)/100:0, gs=m.raw.gas?(rateAt(m.raw.gas.sc,now)||0)/100:0;
@@ -564,12 +573,15 @@ function renderDD(m,done){
   ys.push([`Thermostat ${Number(cfg.temp)-2}°C instead of ${Number(cfg.temp)}°C`,heatCost*0.20,'Two degrees, about 20% of heating']);
   const nightW=sum(win,d=>{let v=0;for(let j=0;j<12;j++)v+=d.hhG[j]||0;return v}), dayW=sum(win,d=>{let v=0;for(let j=18;j<32;j++)v+=d.hhG[j]||0;return v});
   if(heatWin>0){ys.push(['Heating off midnight–6am',heatCost*Math.min(1,nightW/heatWin),`${Math.round(nightW/heatWin*100)}% of recent heating ran overnight`]);
-    ys.push(['Heating off 9am–4pm when nobody is in',heatCost*Math.min(1,dayW/heatWin),`${Math.round(dayW/heatWin*100)}% of recent heating ran in the working day. Only if the house is empty`]);}
+    const hrsOut=Number(cfg.hoursOut)||0,dayRate=aHeat*Math.min(1,dayW/heatWin)/(365*7);
+    if(hrsOut>0)ys.push([`Heating off when out (${hrsOut} hours a week)`,hrsOut*52*dayRate*0.6*ge,'A smart thermostat can do this automatically when her phone leaves the house. Counts 60% of the gas, because the house needs reheating']);}
+  ys.push(['Boiler flow temperature down to 60°C',(aGas*ge)*0.09,'Free. About 9% of gas (Nesta), if it is a combi boiler currently set near 80°C']);
+  ys.push(['Smart radiator valves, heating only rooms in use',heatCost*0.05,'About 3–8% of heating in real-world trials. Most useful in rooms that sit empty all day']);
   if(m.raw.elec&&done.length>=14){const d30=done.slice(-30),base=priceSmart(m,d30,m.raw.elec.unit,m.raw.elec.sc);
     for(const [nm,mk,why] of [['Octopus Flux','**','needs the solar installation certificate'],['Octopus Go','*','needs Octopus to accept the Jersey-registered car']]){const a=(m.raw.alts||[]).find(x=>x.name===nm);if(!a||!base)continue;
       const v=priceSmart(m,d30,a.unit,a.sc);if(v&&v.smart<base.asis)ys.push([`Switch electricity to ${nm}${mk}, charge the car and battery in its cheap hours`,(base.asis-v.smart)*365/d30.length,`${mk} ${why}. Uses the last ${d30.length} days of readings`])}}
   ys.sort((a,b)=>b[1]-a[1]);
-  $('saveCard').innerHTML='<table><tr><th>Change</th><th class="n">A year</th><th class="n">A month</th></tr>'+ys.map(y=>`<tr><td>${y[0]}<div class="sub">${y[2]}</div></td><td class="n">${gbp(y[1])}</td><td class="n">${gbp(y[1]/12)}</td></tr>`).join('')+'</table><p class="sub">Savings overlap, so they don\'t simply add up. For example, a lower thermostat also cuts the overnight and daytime figures. Turning the boiler\'s flow temperature down to about 60°C is another free saving these figures don\'t include.</p>';
+  $('saveCard').innerHTML='<table><tr><th>Change</th><th class="n">A year</th><th class="n">A month</th></tr>'+ys.map(y=>`<tr><td>${y[0]}<div class="sub">${y[2]}</div></td><td class="n">${gbp(y[1])}</td><td class="n">${gbp(y[1]/12)}</td></tr>`).join('')+'</table><p class="sub">Savings overlap, so they don\'t simply add up. For example, a lower thermostat also cuts the overnight figure.</p>'+compareHeaters(m,win,ge,ee);
 }
 
 let weatherBusy=false;
@@ -588,7 +600,7 @@ async function refresh(){
     $('dataNote').textContent='Latest readings from Octopus: gas to '+lastT(raw.gas&&raw.gas.hh)+', electricity to '+lastT(raw.elec&&raw.elec.hh)+'.';return true}
   catch(e){const msg=(e&&e.message)||'Could not reach Octopus.';setStatus('Not updated: '+esc(/fetch|network|load/i.test(msg)?'no connection to Octopus.':msg));$('setupErr').textContent=msg;return false}
 }
-function fillSettings(){$('fKey').value=cfg.key||'';$('fAcct').value=cfg.acct||'';$('fDD').value=cfg.dd;$('fGas').value=cfg.gasFactor;$('fBal').value=cfg.bal;$('fTemp').value=cfg.temp;$('fBatt').value=cfg.batt;$('fLoc').value=cfg.loc||DEF.loc}
+function fillSettings(){$('fKey').value=cfg.key||'';$('fAcct').value=cfg.acct||'';$('fDD').value=cfg.dd;$('fGas').value=cfg.gasFactor;$('fBal').value=cfg.bal;$('fTemp').value=cfg.temp;$('fBatt').value=cfg.batt;$('fLoc').value=cfg.loc||DEF.loc;$('fOut').value=cfg.hoursOut??6}
 function showSetup(){go('settings')}
 function showHome(){$('connect').classList.toggle('hidden',!!model);$('home').classList.toggle('hidden',!model)}
 // screens: one per hash, so the phone's own back button works too
@@ -600,7 +612,7 @@ function go(id){if(id==='home'){back();return}depth++;location.hash=id}
 function back(){if(depth>0){depth--;history.back()}else{history.replaceState(null,'',location.pathname+location.search);show()}}
 window.addEventListener('hashchange',()=>{if(!location.hash)depth=0;show()});
 document.addEventListener('click',e=>{const t=e.target.closest('[data-go]');if(t){go(t.dataset.go);return}if(e.target.closest('.back'))back()});
-$('btnSave').onclick=async()=>{cfg=Object.assign({},DEF,{key:$('fKey').value.trim(),acct:$('fAcct').value.trim().toUpperCase(),dd:Number($('fDD').value)||0,gasFactor:Number($('fGas').value)||0,bal:Number($('fBal').value)||0,temp:Number($('fTemp').value)||21,batt:Number($('fBatt').value)||0,loc:($('fLoc').value.trim()||DEF.loc)});
+$('btnSave').onclick=async()=>{cfg=Object.assign({},DEF,{key:$('fKey').value.trim(),acct:$('fAcct').value.trim().toUpperCase(),dd:Number($('fDD').value)||0,gasFactor:Number($('fGas').value)||0,bal:Number($('fBal').value)||0,temp:Number($('fTemp').value)||21,batt:Number($('fBatt').value)||0,loc:($('fLoc').value.trim()||DEF.loc),hoursOut:Number($('fOut').value)||0});
   if(!cfg.key||!cfg.acct){$('setupErr').textContent='Enter the API key and account number.';return}
   store.set('he_cfg',cfg);$('setupErr').textContent='Loading…';if(await refresh()){$('setupErr').textContent='';showHome();back()}};
 $('btnForget').onclick=()=>{cfg=Object.assign({},DEF);store.del('he_cfg');store.del('he_cache');model=null;fillSettings();showHome();setStatus('Key removed from this phone.')};
