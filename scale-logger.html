@@ -26,7 +26,7 @@ input{background:#0b0d11;color:var(--text);border:1px solid #333;border-radius:8
 </head>
 <body>
 <h1>Scale Logger</h1>
-<p class="sub">v2 · Captures every packet from the Healthkeep scale (service FFB0) for decoding.</p>
+<p class="sub">v3 · Captures every packet from the Healthkeep scale (service FFB0) for decoding.</p>
 
 <div class="row">
   <button id="connect">Connect</button>
@@ -37,7 +37,7 @@ input{background:#0b0d11;color:var(--text);border:1px solid #333;border-radius:8
 <div id="status">Close Fitdays and nRF Connect, step on the scale to wake it, then tap Connect.</div>
 
 <div class="card">
-  <div class="label">Live weight (bytes 7–8 ÷ 100)</div>
+  <div class="label">Live weight</div>
   <div class="big"><span id="weight">–</span> <span style="font-size:20px">kg</span></div>
 </div>
 
@@ -61,7 +61,7 @@ input{background:#0b0d11;color:var(--text);border:1px solid #333;border-radius:8
 
 <script>
 const SVC=0xffb0, W=0xffb1, N=0xffb2, I=0xffb3;
-let dev=null, wChar=null, lines=[];
+let dev=null, wChar=null, lines=[], part0=null;
 const $=id=>document.getElementById(id);
 const toHex=b=>[...b].map(x=>x.toString(16).padStart(2,'0').toUpperCase()).join(' ');
 const status=(s,err)=>{$('status').textContent=s;$('status').className=err?'err':'';};
@@ -126,9 +126,16 @@ function onData(name,v){
   const type=b.length>3?b[3].toString(16).toUpperCase().padStart(2,'0'):'??';
   let extra='';
   if(type==='A2'&&b.length>8){
-    const kg=((b[7]<<8)|b[8])/100;
-    extra='  -> '+kg.toFixed(2)+' kg?';
+    const kg=((b[6]<<16)|(b[7]<<8)|b[8])/1000;
+    extra='  -> '+kg.toFixed(2)+' kg '+(b[4]===3?'(locked)':'(live)');
     $('weight').textContent=kg.toFixed(2);
+  }
+  if(type==='A3') part0=b;
+  if(b[1]===0x1a&&b[2]===1&&part0){
+    const d=[...part0.slice(10,19),...b.slice(3,14)];
+    const z=[];for(let i=0;i<20;i+=2)z.push(((d[i+1]<<8)|d[i])/10);
+    extra='  -> impedance 20kHz: '+z.slice(0,5).join(', ')+' | 100kHz: '+z.slice(5).join(', ');
+    part0=null;
   }
   log(name+' ['+type+'] '+toHex(b)+extra, type==='A2'?'A2':'other');
 }
