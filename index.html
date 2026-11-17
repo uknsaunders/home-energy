@@ -148,7 +148,7 @@ html,body{height:100%;overflow:hidden;overscroll-behavior:none}
 (function(){
 'use strict';
 const API='https://api.octopus.energy/v1';
-const DEF={key:'',acct:'',dd:105,gasFactor:11.36,bal:0,baseGas:2.7,temp:21,batt:9,loc:'53.65,-1.78',hoursOut:6,rads:14,radsDay:4};
+const DEF={key:'',acct:'',dd:105,gasFactor:11.36,bal:0,baseGas:2.7,temp:21,batt:9,loc:'53.65,-1.78',hoursOut:6,rads:13,radsDay:4};
 const TZ='Europe/London';
 const $=id=>document.getElementById(id);
 const store={get(k){try{return JSON.parse(localStorage.getItem(k))}catch(e){return null}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}},del(k){try{localStorage.removeItem(k)}catch(e){}}};
@@ -582,7 +582,7 @@ function renderDD(m,done){
   ys.push(['Boiler flow temperature down to 60°C',(aGas*ge)*0.09,'Free. About 9% of gas (Nesta), if it is a combi boiler currently set near 80°C']);
   {const R=Number(cfg.rads)||0,U=Math.min(R,Number(cfg.radsDay)||0),dayShare=heatWin>0?Math.min(1,dayW/heatWin):0.4;
    const v=R>0&&U<R?heatCost*dayShare*(1-U/R)*0.5+heatCost*0.03:heatCost*0.05;
-   ys.push([`Smart radiator valves${R?` on ${R} radiators, heating ${U} in the day`:''}`,v,`Rooms left off still lose some heat to the rest of the house, so this counts half the saving, plus 3% from better control. Fitting ${R||14} valves costs roughly £${(R||14)*31}–£${(R||14)*75} plus a hub. Turning ordinary radiator valves down to 1–2 in unused rooms is free`]);}
+   ys.push([`Smart radiator valves${R?` on ${R} radiators, heating ${U} in the day`:''}`,v,`Rooms left off still lose some heat to the rest of the house, so this counts half the saving, plus 3% from better control. Fitting ${R||13} valves costs roughly £${(R||13)*31}–£${(R||13)*75} plus a hub. Turning ordinary radiator valves down to 1–2 in unused rooms is free`]);}
   if(m.raw.elec&&done.length>=14){const d30=done.slice(-30),base=priceSmart(m,d30,m.raw.elec.unit,m.raw.elec.sc);
     for(const [nm,mk,why] of [['Octopus Flux','**','needs the solar installation certificate'],['Octopus Go','*','needs Octopus to accept the Jersey-registered car']]){const a=(m.raw.alts||[]).find(x=>x.name===nm);if(!a||!base)continue;
       const v=priceSmart(m,d30,a.unit,a.sc);if(v&&v.smart<base.asis)ys.push([`Switch electricity to ${nm}${mk}, charge the car and battery in its cheap hours`,(base.asis-v.smart)*365/d30.length,`${mk} ${why}. Uses the last ${d30.length} days of readings`])}}
@@ -606,7 +606,7 @@ async function refresh(){
     $('dataNote').textContent='Latest readings from Octopus: gas to '+lastT(raw.gas&&raw.gas.hh)+', electricity to '+lastT(raw.elec&&raw.elec.hh)+'.';return true}
   catch(e){const msg=(e&&e.message)||'Could not reach Octopus.';setStatus('Not updated: '+esc(/fetch|network|load/i.test(msg)?'no connection to Octopus.':msg));$('setupErr').textContent=msg;return false}
 }
-function fillSettings(){$('fKey').value=cfg.key||'';$('fAcct').value=cfg.acct||'';$('fDD').value=cfg.dd;$('fGas').value=cfg.gasFactor;$('fBal').value=cfg.bal;$('fTemp').value=cfg.temp;$('fBatt').value=cfg.batt;$('fLoc').value=cfg.loc||DEF.loc;$('fOut').value=cfg.hoursOut??6;$('fRads').value=cfg.rads??14;$('fRadsDay').value=cfg.radsDay??4}
+function fillSettings(){$('fKey').value=cfg.key||'';$('fAcct').value=cfg.acct||'';$('fDD').value=cfg.dd;$('fGas').value=cfg.gasFactor;$('fBal').value=cfg.bal;$('fTemp').value=cfg.temp;$('fBatt').value=cfg.batt;$('fLoc').value=cfg.loc||DEF.loc;$('fOut').value=cfg.hoursOut??6;$('fRads').value=cfg.rads??13;$('fRadsDay').value=cfg.radsDay??4}
 function showSetup(){go('settings')}
 function showHome(){$('connect').classList.toggle('hidden',!!model);$('home').classList.toggle('hidden',!model)}
 // screens: one per hash, so the phone's own back button works too
