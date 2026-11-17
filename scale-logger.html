@@ -17,7 +17,8 @@ button:disabled{opacity:.4}
 .card{background:var(--card);border-radius:10px;padding:12px;margin-bottom:12px}
 .label{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.05em}
 .big{font-size:44px;font-weight:700;font-variant-numeric:tabular-nums}
-#status{color:var(--muted);font-size:13px;margin-bottom:12px}
+#status{color:var(--text);background:#2a2f3a;border-radius:8px;padding:10px;font-size:14px;margin-bottom:12px}
+#status.err{background:#5c1f1f;color:#ffdada}
 input{background:#0b0d11;color:var(--text);border:1px solid #333;border-radius:8px;padding:10px;font:14px ui-monospace,monospace;flex:1;min-width:0}
 #log{font:12px/1.5 ui-monospace,monospace;white-space:pre-wrap;word-break:break-all;max-height:50vh;overflow:auto}
 .A2{color:var(--ok)}.other{color:var(--warn)}.sys{color:var(--muted)}
@@ -25,10 +26,11 @@ input{background:#0b0d11;color:var(--text);border:1px solid #333;border-radius:8
 </head>
 <body>
 <h1>Scale Logger</h1>
-<p class="sub">Captures every packet from the Healthkeep scale (service FFB0) for decoding.</p>
+<p class="sub">v2 · Captures every packet from the Healthkeep scale (service FFB0) for decoding.</p>
 
 <div class="row">
   <button id="connect">Connect</button>
+  <button class="sec" id="any">Show all devices</button>
   <button class="sec" id="copy">Copy log</button>
   <button class="sec" id="clear">Clear</button>
 </div>
@@ -62,7 +64,7 @@ const SVC=0xffb0, W=0xffb1, N=0xffb2, I=0xffb3;
 let dev=null, wChar=null, lines=[];
 const $=id=>document.getElementById(id);
 const toHex=b=>[...b].map(x=>x.toString(16).padStart(2,'0').toUpperCase()).join(' ');
-const status=s=>$('status').textContent=s;
+const status=(s,err)=>{$('status').textContent=s;$('status').className=err?'err':'';};
 
 function log(text,cls){
   const now=new Date();
@@ -76,14 +78,14 @@ function log(text,cls){
   $('count').textContent=lines.length;
 }
 
-async function connect(){
-  if(!navigator.bluetooth){status('Web Bluetooth not available. Use Chrome on Android, on an https page.');return;}
+async function connect(all){
+  status('Opening device picker…');
+  if(!navigator.bluetooth){status('Web Bluetooth is not available in this browser. Open this link in Chrome (not Samsung Internet or an in-app browser).',true);return;}
   try{
     if(!dev){
-      dev=await navigator.bluetooth.requestDevice({
-        filters:[{namePrefix:'HEALTHKEEP'},{services:[SVC]}],
-        optionalServices:[SVC,0x180a]
-      });
+      dev=await navigator.bluetooth.requestDevice(all?
+        {acceptAllDevices:true,optionalServices:[SVC,0x180a]}:
+        {filters:[{namePrefix:'HEALTHKEEP'},{namePrefix:'Healthkeep'},{services:[SVC]}],optionalServices:[SVC,0x180a]});
       dev.addEventListener('gattserverdisconnected',()=>{
         log('-- disconnected','sys');
         status('Disconnected. Step on the scale to wake it, then tap Connect.');
@@ -110,7 +112,13 @@ async function connect(){
     }
     status('Listening. Stand barefoot, hold the handle, and stay on until the display finishes.');
     $('connect').disabled=true;
-  }catch(e){status('Error: '+e.message);}
+  }catch(e){
+    dev=null;
+    let msg=e.name+': '+e.message;
+    if(e.name==='NotFoundError'&&/cancel/i.test(e.message)) msg='Picker closed without choosing a device. Step on the scale, then try again.';
+    else if(/adapter|disabled|permission|denied|globally/i.test(e.message)) msg+=' Check Bluetooth is on, and that Chrome has the Nearby devices and Location permissions (Android Settings > Apps > Chrome > Permissions).';
+    status(msg,true);
+  }
 }
 
 function onData(name,v){
@@ -144,7 +152,11 @@ function copy(){
     ()=>status('Copy failed. Long-press the log to select it instead.'));
 }
 
-$('connect').onclick=connect;
+$('connect').onclick=()=>connect(false);
+$('any').onclick=()=>connect(true);
+if(!navigator.bluetooth) status('Web Bluetooth is not available in this browser. Open this link in Chrome (not Samsung Internet or an in-app browser).',true);
+else if(navigator.bluetooth.getAvailability) navigator.bluetooth.getAvailability().then(ok=>{if(!ok) status('Chrome reports no Bluetooth available. Turn Bluetooth on and give Chrome the Nearby devices permission.',true);});
+window.addEventListener('error',e=>status('Page error: '+e.message,true));
 $('copy').onclick=copy;
 $('clear').onclick=()=>{lines=[];$('log').innerHTML='';$('count').textContent='0';$('weight').textContent='–';};
 $('send').onclick=send;
