@@ -224,7 +224,10 @@ async function fetchAll(){
     const ag=current(emp.agreements), tc=ag.tariff_code, pc=productOf(tc), serial=emp.meters[emp.meters.length-1].serial_number;
     res.elec={mpan:emp.mpan,serial,tariff:tc,region:tc.slice(-1),eac:emp.consumption_standard};
     jobs.push(get(`${API}/electricity-meter-points/${emp.mpan}/meters/${serial}/consumption/?${pf}&page_size=25000&order_by=period`,true).then(v=>res.elec.hh=v.sort((a,b)=>Date.parse(a.interval_start)-Date.parse(b.interval_start))));
-    jobs.push(timeline('electricity',emp.agreements,from.toISOString()).then(t=>{res.elec.unit=t.unit;res.elec.sc=t.sc;res.elec.periods=t.periods}));
+    jobs.push(timeline('electricity',emp.agreements,from.toISOString()).then(async t=>{res.elec.unit=t.unit;res.elec.sc=t.sc;res.elec.periods=t.periods;
+      const now=Date.now(),past=t.periods.filter(p=>Date.parse(p.from)<=now);
+      if(past.length>1){const pv=past[past.length-2],b=`${API}/products/${pv.product}/electricity-tariffs/${pv.tariff}`;
+        try{const [u,sc]=await Promise.all([get(`${b}/standard-unit-rates/?${pf36}&page_size=1500`),get(`${b}/standing-charges/?${pf36}&page_size=1500`)]);res.elec.prev={name:pv.name,unit:ddOnly(u),sc:ddOnly(sc)}}catch(e){}}}));
     // current tariff's own rates for the last 36 days, to price recent usage as if it had all been on it
     jobs.push(get(`${API}/products/${pc}/electricity-tariffs/${tc}/standard-unit-rates/?${pf36}&page_size=1500`).then(v=>res.elec.curUnit=ddOnly(v)).catch(()=>{}));
     jobs.push(get(`${API}/products/${pc}/electricity-tariffs/${tc}/standing-charges/?${pf36}&page_size=1500`).then(v=>res.elec.curSc=ddOnly(v)).catch(()=>{}));
@@ -593,6 +596,48 @@ function compareHeaters(m,win,ge,ee){
   return `<h3>Cost per hour to keep warm</h3><table>${rows.map(r=>`<tr><td>${r[0]}</td><td class="n">${(r[1]*100).toFixed(0)}p</td></tr>`).join('')}</table>
   <p class="sub">Electricity costs about ${(ee/ge).toFixed(1)} times as much per unit as gas, so the Dyson is only cheaper if the central heating is turned right down and she heats just one room. A heated throw at the desk is the cheapest way to stay warm.</p>`;
 }
+function goAdvice(m,done){
+  const ti=tariffInfo(m);if(!ti.tou||!m.raw.elec)return '';
+  const since=ti.cur?dayKey(new Date(ti.cur.from)):'';
+  const onDays=done.filter(d=>d.key>=since&&d.ne>=46).slice(-14);
+  const live=onDays.length>=3,D=live?onDays:done.slice(-30),L=live?m.raw.elec.unit:(m.raw.elec.curUnit||m.raw.elec.unit);
+  if(!D.length)return '';
+  const keys=new Set(D.map(d=>d.key)),n=D.length,per=30/n;
+  const car=steadyBlocks(m,45).filter(b=>keys.has(dayKey(b.start))),carSet=new Set();car.forEach(b=>b.items.forEach(i=>carSet.add(i.interval_start)));
+  let tot=0,cheap=0,cost=0,carK=0,carCheap=0,carExtra=0;const dearByDay={},minByDay={},hourly=new Array(24).fill(0);
+  for(const r of m.raw.elec.hh||[]){const t=Date.parse(r.interval_start),k=dayKey(new Date(t));if(!keys.has(k))continue;
+    const p=rateAt(L,t);if(p==null)continue;const mn=minByDay[k]??(minByDay[k]=dayMinRate(L,t));const isC=p<=mn*1.01;
+    tot+=r.consumption;cost+=r.consumption*p/100;if(isC)cheap+=r.consumption;hourly[hourOf(new Date(t))]+=r.consumption/n;
+    if(carSet.has(r.interval_start)){carK+=r.consumption;if(isC)carCheap+=r.consumption;else carExtra+=r.consumption*(p-mn)/100}
+    else if(!isC)dearByDay[k]=(dearByDay[k]||0)+r.consumption}
+  const B=Number(cfg.batt)||0,spread=Math.max(0,ti.dayRate-ti.cheapRate);
+  const battK=Object.values(dearByDay).reduce((s,v)=>s+Math.min(B,v),0),battSave=battK*spread;
+  const score=tot?cheap/tot:0,target=0.7;
+  try{const nb=document.querySelector('#home [data-go="save"]');if(nb)nb.innerHTML=`<span class="ni">\u2193</span>Ways to save<span class="sub" style="font-weight:400">${Math.round(score*100)}% in cheap hours</span>`}catch(e){}
+  let prevTxt='';
+  if(live&&m.raw.elec.prev){let pc=0,ok=true;for(const r of m.raw.elec.hh||[]){const t=Date.parse(r.interval_start);if(!keys.has(dayKey(new Date(t))))continue;const p=rateAt(m.raw.elec.prev.unit,t);if(p==null){ok=false;break}pc+=r.consumption*p/100}
+    const goSc=D.reduce((s,d)=>s+(rateAt(m.raw.elec.sc,Date.parse(d.key+'T12:00:00Z'))||0)/100,0),pvSc=D.reduce((s,d)=>s+(rateAt(m.raw.elec.prev.sc,Date.parse(d.key+'T12:00:00Z'))||0)/100,0);
+    if(ok){const diff=(pc+pvSc)-(cost+goSc);prevTxt=`<p>${diff>=0?`<b>Saved ${gbp(diff)}</b>`:`<b>Cost ${gbp(-diff)} more</b>`} in ${n} day${n>1?'s':''} on ${esc(ti.curName)}, compared with staying on ${esc(m.raw.elec.prev.name)} (about ${gbp(Math.abs(diff)*per)} a month ${diff>=0?'saved':'extra'}).</p>`}}
+  // score bar
+  const W=600,H=44,bx=v=>v*W;
+  const bar=`<svg viewBox="0 0 ${W} ${H+18}" role="img" aria-label="Share of electricity used in the cheap hours"><rect x="0" y="6" width="${W}" height="${H-12}" rx="6" fill="var(--line)"/><rect x="0" y="6" width="${Math.max(6,bx(score))}" height="${H-12}" rx="6" fill="${score>=target?'var(--accent)':'var(--elec)'}"/>
+    <line x1="${bx(target)}" x2="${bx(target)}" y1="0" y2="${H-2}" stroke="var(--ink)" stroke-width="2"/><text x="${bx(target)}" y="${H+14}" text-anchor="middle" fill="var(--ink)">aim 70%+</text>
+    <text x="${Math.max(6,bx(score))+8}" y="${H/2+6}" font-weight="700" style="font-size:18px;fill:var(--ink)">${Math.round(score*100)}%</text></svg>`;
+  const t2=(x)=>x.toFixed(1);
+  const steps=[];
+  if(carK>0)steps.push([`Car charging`,carExtra*per,`${t2(carK-carCheap)} of ${t2(carK)} kWh charged at the dear rate. In the charger's app set a schedule of 00:30–05:30 at full speed (7 kW) and turn off solar or eco mode. 5 hours at 7 kW is up to 35 kWh a night.`]);
+  if(B>0)steps.push([`House battery`,battSave*per,`Set it to charge from the grid 00:30–05:30, to 100% in winter (solar is low), and to power the house from 05:30. ${t2(battK/n)} kWh a day of dear-rate use could come from it. In summer lower the overnight target to leave room for solar.`]);
+  steps.push([`Washing machine, dishwasher, tumble dryer`,null,`With the battery charged overnight they run on 9p electricity in the day anyway, so there's no need to run them at night. Fire services advise against leaving these running overnight or while out. Without the battery, each kWh moved into the cheap hours saves ${(spread*100).toFixed(0)}p.`]);
+  steps.push([`Daytime heaters (the Dyson)`,null,`On Go the day rate is ${(ti.dayRate*100).toFixed(0)}p, so electric heating costs more than before. Keep it to short bursts in one room, or use a heated throw.`]);
+  return `<h3 style="margin-top:0">Making the most of ${esc(ti.curName)}</h3>
+  <p class="sub" style="margin-top:0">${(ti.cheapRate*100).toFixed(2)}p from 00:30 to 05:30, ${(ti.dayRate*100).toFixed(2)}p at other times. ${live?`Her last ${n} days on ${esc(ti.curName)}.`:`Not enough readings since the switch yet, so this prices her last ${n} days of usage at ${esc(ti.curName)} rates.`}</p>
+  <div class="legend" style="margin-bottom:0">Share of electricity used in the cheap hours</div>${bar}
+  ${prevTxt}
+  <p>Average price paid: <b>${(tot?cost/tot*100:0).toFixed(1)}p per kWh</b>. If everything ran in the cheap hours it would be ${(ti.cheapRate*100).toFixed(1)}p; at ${Math.round(target*100)}% it would be about ${((target*ti.cheapRate+(1-target)*ti.dayRate)*100).toFixed(1)}p.</p>
+  <h3>Her electricity by hour (cheap hours shaded)</h3>${hourChart(hourly,'var(--elec)','kWh electricity',[0.5,5.5])}
+  <table><tr><th>To do</th><th class="n">Saves a month</th></tr>${steps.map(x=>`<tr><td><b>${x[0]}</b><div class="sub">${x[2]}</div></td><td class="n">${x[1]==null?'–':gbp(x[1])}</td></tr>`).join('')}</table>
+  <h3>Other ways to save</h3>`;
+}
 function renderDD(m,done){
   const now=new Date(),sum=(a,f)=>a.reduce((s,x)=>s+f(x),0);
   const ge=m.raw.gas?(rateAt(m.raw.gas.unit,now)||0)/100:0, gs=m.raw.gas?(rateAt(m.raw.gas.sc,now)||0)/100:0;
@@ -663,7 +708,7 @@ function renderDD(m,done){
     for(const [nm,mk,why] of [['Octopus Flux','**','needs the solar installation certificate'],['Octopus Go','*','needs Octopus to accept the Jersey-registered car']]){const a=(m.raw.alts||[]).find(x=>x.name===nm);if(!a||!base||onCur(nm))continue;
       const v=priceSmart(m,d30,a.unit,a.sc);if(v&&v.smart<ref-5*d30.length/365)ys.push([`Switch electricity to ${nm}${mk}, charge the car and battery in its cheap hours`,(ref-v.smart)*365/d30.length,`${mk} ${why}. Uses the last ${d30.length} days of readings${ti.tou?', compared with making full use of '+esc(ti.curName):''}`])}}
   ys.sort((a,b)=>b[1]-a[1]);
-  $('saveCard').innerHTML='<table><tr><th>Change</th><th class="n">A year</th><th class="n">A month</th></tr>'+ys.map(y=>`<tr><td>${y[0]}<div class="sub">${y[2]}</div></td><td class="n">${gbp(y[1])}</td><td class="n">${gbp(y[1]/12)}</td></tr>`).join('')+'</table><p class="sub">Savings overlap, so they don\'t simply add up. For example, a lower thermostat also cuts the overnight figure.</p>'+compareHeaters(m,win,ge,ee);
+  $('saveCard').innerHTML=goAdvice(m,done)+'<table><tr><th>Change</th><th class="n">A year</th><th class="n">A month</th></tr>'+ys.map(y=>`<tr><td>${y[0]}<div class="sub">${y[2]}</div></td><td class="n">${gbp(y[1])}</td><td class="n">${gbp(y[1]/12)}</td></tr>`).join('')+'</table><p class="sub">Savings overlap, so they don\'t simply add up. For example, a lower thermostat also cuts the overnight figure.</p>'+compareHeaters(m,win,ge,ee);
 }
 
 let weatherBusy=false;
