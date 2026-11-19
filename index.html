@@ -179,8 +179,36 @@ async function get(url,auth){
 const productOf=tc=>tc.split('-').slice(2,-1).join('-');
 const current=ags=>{const now=Date.now();return (ags||[]).find(a=>new Date(a.valid_from)<=now&&(!a.valid_to||new Date(a.valid_to)>now))||(ags||[]).slice(-1)[0]};
 const ddOnly=list=>list.filter(r=>!r.payment_method||r.payment_method==='DIRECT_DEBIT');
-function rateAt(list,t){for(const r of list){if(new Date(r.valid_from)<=t&&(!r.valid_to||new Date(r.valid_to)>t))return r.value_inc_vat}return null}
+function rateAt(list,t){
+  if(!list||!list.length)return null;
+  let ix=list._ix;
+  if(!ix){ix=list.map(r=>[Date.parse(r.valid_from),r.valid_to?Date.parse(r.valid_to):Infinity,r.value_inc_vat]).sort((a,b)=>a[0]-b[0]);try{Object.defineProperty(list,'_ix',{value:ix,enumerable:false})}catch(e){}}
+  const x=+t;let lo=0,hi=ix.length-1,f=-1;
+  while(lo<=hi){const mid=(lo+hi)>>1;if(ix[mid][0]<=x){f=mid;lo=mid+1}else hi=mid-1}
+  for(let i=f;i>=0&&i>f-4;i--)if(ix[i][0]<=x&&ix[i][1]>x)return ix[i][2];
+  return null}
+// cheapest rate in force on the same local day as t (for time-of-use tariffs such as Octopus Go)
+function dayMinRate(list,t){const k=dayKey(new Date(t)),base=Date.parse(k+'T00:00:00Z')-2*36e5;let mn=Infinity;
+  for(let h=0;h<56;h++){const tt=base+h*18e5;if(dayKey(new Date(tt))!==k)continue;const r=rateAt(list,tt);if(r!=null&&r<mn)mn=r}return isFinite(mn)?mn:null}
 
+// Rates for every tariff agreement in the window, joined into one timeline, so each half hour is
+// priced on the tariff that was actually in force at the time.
+async function timeline(fuel,ags,fromISO){
+  const end=new Date(Date.now()+3*864e5).toISOString(),from=Date.parse(fromISO);
+  const list=(ags||[]).filter(a=>!a.valid_to||Date.parse(a.valid_to)>from).sort((a,b)=>Date.parse(a.valid_from)-Date.parse(b.valid_from));
+  const unit=[],sc=[],periods=[];
+  await Promise.all(list.map(async a=>{
+    const tc=a.tariff_code,pc=productOf(tc),f=new Date(Math.max(from,Date.parse(a.valid_from))).toISOString(),to=a.valid_to||end;
+    const q=`period_from=${f}&period_to=${to}&page_size=1500`,b=`${API}/products/${pc}/${fuel}-tariffs/${tc}`;
+    const clip=r=>{const vf=Math.max(Date.parse(r.valid_from),Date.parse(f)),vt=Math.min(r.valid_to?Date.parse(r.valid_to):Infinity,Date.parse(to));
+      return vt>vf?Object.assign({},r,{valid_from:new Date(vf).toISOString(),valid_to:isFinite(vt)?new Date(vt).toISOString():null}):null};
+    const [u,s,prod]=await Promise.all([get(`${b}/standard-unit-rates/?${q}`),get(`${b}/standing-charges/?${q}`),get(`${API}/products/${pc}/`).catch(()=>({}))]);
+    ddOnly(u).map(clip).filter(Boolean).forEach(r=>unit.push(r));ddOnly(s).map(clip).filter(Boolean).forEach(r=>sc.push(r));
+    periods.push({tariff:tc,product:pc,name:(prod&&prod.display_name)||pc,from:a.valid_from,to:a.valid_to||null});
+  }));
+  periods.sort((a,b)=>Date.parse(a.from)-Date.parse(b.from));
+  return {unit,sc,periods};
+}
 async function fetchAll(){
   const acct=await get(`${API}/accounts/${encodeURIComponent(cfg.acct.trim())}/`,true);
   const prop=(acct.properties||[]).find(p=>!p.moved_out_at)||acct.properties[0];
@@ -196,8 +224,11 @@ async function fetchAll(){
     const ag=current(emp.agreements), tc=ag.tariff_code, pc=productOf(tc), serial=emp.meters[emp.meters.length-1].serial_number;
     res.elec={mpan:emp.mpan,serial,tariff:tc,region:tc.slice(-1),eac:emp.consumption_standard};
     jobs.push(get(`${API}/electricity-meter-points/${emp.mpan}/meters/${serial}/consumption/?${pf}&page_size=25000&order_by=period`,true).then(v=>res.elec.hh=v.sort((a,b)=>Date.parse(a.interval_start)-Date.parse(b.interval_start))));
-    jobs.push(get(`${API}/products/${pc}/electricity-tariffs/${tc}/standard-unit-rates/?${pf}&page_size=1500`).then(v=>res.elec.unit=ddOnly(v)));
-    jobs.push(get(`${API}/products/${pc}/electricity-tariffs/${tc}/standing-charges/?${pf}&page_size=1500`).then(v=>res.elec.sc=ddOnly(v)));
+    jobs.push(timeline('electricity',emp.agreements,from.toISOString()).then(t=>{res.elec.unit=t.unit;res.elec.sc=t.sc;res.elec.periods=t.periods}));
+    // current tariff's own rates for the last 36 days, to price recent usage as if it had all been on it
+    jobs.push(get(`${API}/products/${pc}/electricity-tariffs/${tc}/standard-unit-rates/?${pf36}&page_size=1500`).then(v=>res.elec.curUnit=ddOnly(v)).catch(()=>{}));
+    jobs.push(get(`${API}/products/${pc}/electricity-tariffs/${tc}/standing-charges/?${pf36}&page_size=1500`).then(v=>res.elec.curSc=ddOnly(v)).catch(()=>{}));
+    res.elec.next=(emp.agreements||[]).filter(a=>Date.parse(a.valid_from)>Date.now()).map(a=>({tariff:a.tariff_code,from:a.valid_from}))[0]||null;
     jobs.push(get(`${API}/products/?is_variable=true&brand=OCTOPUS_ENERGY&page_size=100`).then(async ps=>{
       const want=[['Agile Octopus',/^AGILE-(?!OUTGOING)/],['Octopus Flux',/^FLUX-IMPORT-/],['Octopus Go',/^GO-VAR-/]];
       res.alts=[];
@@ -217,8 +248,7 @@ async function fetchAll(){
     const ag=current(gmp.agreements), tc=ag.tariff_code, pc=productOf(tc), serial=gmp.meters[gmp.meters.length-1].serial_number;
     res.gas={mprn:gmp.mprn,serial,tariff:tc,eac:gmp.consumption_standard};
     jobs.push(get(`${API}/gas-meter-points/${gmp.mprn}/meters/${serial}/consumption/?${pf}&page_size=25000&order_by=period`,true).then(v=>res.gas.hh=v.sort((a,b)=>Date.parse(a.interval_start)-Date.parse(b.interval_start))));
-    jobs.push(get(`${API}/products/${pc}/gas-tariffs/${tc}/standard-unit-rates/?${pf}&page_size=1500`).then(v=>res.gas.unit=ddOnly(v)));
-    jobs.push(get(`${API}/products/${pc}/gas-tariffs/${tc}/standing-charges/?${pf}&page_size=1500`).then(v=>res.gas.sc=ddOnly(v)));
+    jobs.push(timeline('gas',gmp.agreements,from.toISOString()).then(t=>{res.gas.unit=t.unit;res.gas.sc=t.sc;res.gas.periods=t.periods}));
   }
   await Promise.all(jobs);
   return res;
@@ -241,7 +271,7 @@ function build(raw){
 
 function steadyBlocks(m,sinceDays){
   // runs of 8+ hours of a flat ~1–2.6 kW draw (typical of a car on a 3-pin charger); short dips allowed
-  const hh=(m.raw.elec&&m.raw.elec.hh)||[];const cut=Date.now()-sinceDays*864e5;const out=[];let run=[],gap=[],on=0;
+  const hh=(m.raw.elec&&m.raw.elec.hh)||[];const lastT=hh.length?Date.parse(hh[hh.length-1].interval_end):Date.now();const cut=Math.min(Date.now(),lastT)-sinceDays*864e5;const out=[];let run=[],gap=[],on=0;
   const flush=()=>{if(run.length>=16&&on>=12){const kwh=run.reduce((s,r)=>s+r.consumption,0);out.push({start:new Date(run[0].interval_start),hours:run.length/2,kwh,cost:run.reduce((s,r)=>s+r.consumption*(rateAt(m.raw.elec.unit,new Date(r.interval_start))||0)/100,0),items:run})}run=[];on=0};
   for(const r of hh){if(new Date(r.interval_start)<cut)continue;
     if(r.consumption>=0.45&&r.consumption<=1.3){if(run.length)run.push(...gap);gap=[];run.push(r);on++}
@@ -267,7 +297,16 @@ function render(m){
   if(last.night>5) al.push(`<b>Heating ran overnight.</b> ${last.night.toFixed(0)} kWh of gas between midnight and 6am on ${niceDay(last.key)} (about ${gbp(last.night*(rateAt(m.raw.gas.unit,new Date(last.key+'T03:00:00Z'))||0)/100)}).`);
   const g7=avg(prev7,d=>d.g);
   if(g7>5&&last.g>g7*1.25) al.push(`<b>Gas up ${Math.round((last.g/g7-1)*100)}%</b> on ${niceDay(last.key)}: ${last.g.toFixed(0)} kWh against a ${g7.toFixed(0)} kWh average for the week before.`);
-  for(const b of steadyBlocks(m,4)) al.push(`<b>Long steady electricity draw</b> (car charger in slow mode?) from ${b.start.toLocaleString('en-GB',{weekday:'short',hour:'2-digit',minute:'2-digit',timeZone:TZ})}: ${b.hours} hours, ${b.kwh.toFixed(1)} kWh, about ${gbp(b.cost)}.`);
+  const ti=tariffInfo(m);
+  for(const b of steadyBlocks(m,4)){const when=b.start.toLocaleString('en-GB',{weekday:'short',hour:'2-digit',minute:'2-digit',timeZone:TZ});
+    let dear=0,extra=0;for(const it of b.items){const t=Date.parse(it.interval_start),r=rateAt(m.raw.elec.unit,t),mn=dayMinRate(m.raw.elec.unit,t);if(r!=null&&mn!=null&&r>mn*1.3){dear+=it.consumption;extra+=it.consumption*(r-mn)/100}}
+    if(dear<1&&b.kwh>3&&rateAt(m.raw.elec.unit,b.start)!=null&&dayMinRate(m.raw.elec.unit,b.start)<rateAt(m.raw.elec.unit,b.start)*1.01&&ti.tou) al.push(`<span class="alert-ok"><b>Car charged in the cheap hours</b> from ${when}: ${b.kwh.toFixed(1)} kWh for ${gbp(b.cost)}.</span>`);
+    else if(dear>=1&&extra>0.3) al.push(`<b>Car charged outside the cheap hours</b> from ${when}: ${dear.toFixed(1)} of ${b.kwh.toFixed(1)} kWh at the dear rate, about ${gbp(extra)} more than charging in the cheap window. Check the charger's schedule.`);
+    else al.push(`<b>Long steady electricity draw</b> (car charger in slow mode?) from ${when}: ${b.hours} hours, ${b.kwh.toFixed(1)} kWh, about ${gbp(b.cost)}.`)}
+  for(const c of ti.changes){const d=Date.parse(c.from),last=m.days.filter(x=>x.complete).slice(-1)[0];
+    if(Date.now()-d<21*864e5){const got=last&&Date.parse(last.key+'T23:59:00Z')>=d;
+      al.push(`<span class="alert-ok"><b>Now on ${esc(c.name)}</b> from ${new Date(d).toLocaleDateString('en-GB',{day:'numeric',month:'short',timeZone:TZ})}. ${got?'Costs from that date use its rates.':'Readings from that date will show in a day or two.'}</span>`)}}
+  if(m.raw.elec&&m.raw.elec.next)al.push(`<span class="alert-ok"><b>Tariff change booked</b> for ${new Date(m.raw.elec.next.from).toLocaleDateString('en-GB',{day:'numeric',month:'short',timeZone:TZ})}. The page will switch to its rates from then.</span>`);
   if(cfg.dd>0&&proj>cfg.dd*1.1) al.push(`<b>Direct Debit too low.</b> At last week's rate this month costs about ${gbp(proj)}, against a Direct Debit of ${gbp(Number(cfg.dd))}.`);
   if(!al.length) al.push('<span class="alert-ok"><b>Nothing unusual</b> in the latest readings.</span>');
   renderAlerts();
@@ -356,6 +395,15 @@ function spark(vals){const W=120,H=22,mx=Math.max(...vals,1),bw=W/vals.length;
   return `<svg viewBox="0 0 ${W} ${H}" style="display:block;width:100%;max-width:140px;height:22px;margin-top:5px" aria-hidden="true">`+
     vals.map((v,i)=>`<rect x="${(i*bw+0.8).toFixed(1)}" y="${(H-v/mx*H).toFixed(1)}" width="${(bw-1.6).toFixed(1)}" height="${(v/mx*H).toFixed(1)}" rx="1" fill="var(--muted)" opacity="${i>=vals.length-7?0.95:0.45}"/>`).join('')+'</svg>';
 }
+function tariffInfo(m){
+  const P=(m.raw.elec&&m.raw.elec.periods)||[],now=Date.now();
+  const cur=P.filter(p=>Date.parse(p.from)<=now).slice(-1)[0]||P[0]||null;
+  const first=m.days.length?Date.parse(m.days[0].key+'T00:00:00Z'):0;
+  const changes=P.filter((p,i)=>i>0&&Date.parse(p.from)>first);
+  const noon=Date.parse(dayKey(new Date())+'T12:00:00Z'),u=m.raw.elec&&m.raw.elec.unit;
+  const tou=!!(u&&rateAt(u,noon)!=null&&dayMinRate(u,noon)!=null&&dayMinRate(u,noon)<rateAt(u,noon)*0.7);
+  return {cur,curName:cur?cur.name:'',changes,tou,dayRate:u?(rateAt(u,noon)||0)/100:0,cheapRate:u?(dayMinRate(u,noon)||0)/100:0};
+}
 function renderAlerts(){
   const al=(model&&model.alertList)||[];if(!al.length)return;
   $('alerts').innerHTML=al.map(a=>`<div class="alert${a.includes('alert-ok')?' ok':''}">${a}</div>`).join('');
@@ -383,10 +431,12 @@ function renderDaily(m){
     s+=`<rect x="${x-1.5}" y="${T}" width="${bw}" height="${H-T-B}" fill="transparent" ${sel?'stroke="var(--ink)"':''}/><title>${niceDay(d.key)}: ${gbp(d.cost)} (gas ${gbp(d.gc)}, electricity ${gbp(d.ec)})${d.complete?'':' — incomplete'}</title></g>`;
     if(i%7===0)s+=`<text x="${x}" y="${H-28}">${niceDay(d.key).replace(/^\w+ /,'')}</text>`});
   const pl=avg.map((v,i)=>v==null?null:`${(L+i*bw+bw/2).toFixed(1)},${y(v).toFixed(1)}`).filter(Boolean).join(' ');
-  if(pl)s+=`<polyline points="${pl}" fill="none" stroke="var(--ink)" stroke-width="2" opacity=".7"/>`;
+  if(pl)s+=`<polyline pointer-events="none" points="${pl}" fill="none" stroke="var(--ink)" stroke-width="2" opacity=".7"/>`;
   const la=avg.filter(v=>v!=null).slice(-1)[0];
   if(budget)s+=`<line x1="${L}" x2="${W}" y1="${y(budget)}" y2="${y(budget)}" stroke="var(--muted)" stroke-width="1.5" stroke-dasharray="5 4"/>`;
   s+=`<text x="${L}" y="${H-6}" fill="var(--muted)">Line: 7-day average${la!=null?', now '+gbp(la)+'/day':''}${budget?' · dashes: Direct Debit covers '+gbp(budget)+'/day':''}</text>`;
+  for(const c of tariffInfo(m).changes){const k=dayKey(new Date(c.from)),i=ds.findIndex(d=>d.key>=k);if(i<0)continue;
+    const xc=L+i*bw;s+=`<g pointer-events="none"><rect x="${xc}" y="${T}" width="${W-xc}" height="${H-T-B}" fill="var(--elec)" opacity=".07"/><line x1="${xc}" x2="${xc}" y1="${T-6}" y2="${H-B}" stroke="var(--ink)" stroke-width="1.5" stroke-dasharray="3 3"/><text x="${Math.min(xc+4,W-110)}" y="${T+4}" fill="var(--ink)" font-weight="600">${esc(c.name)} →</text></g>`}
   s+='</svg>';$('dailyChart').innerHTML=s;
   $('dailyChart').querySelectorAll('.bar').forEach(g=>g.addEventListener('click',()=>{selDay=g.dataset.day;renderDaily(model);renderDay();go('day')}));
 }
@@ -402,9 +452,14 @@ function renderDay(){
   for(let j=0;j<48;j++){const x=L+j*bw,g=d.hhG[j]||0,e=d.hhE[j]||0,t=`${String(j>>1).padStart(2,'0')}:${j%2?'30':'00'}`;
     s+=`<rect x="${x+.5}" y="${y(g)}" width="${bw/2-.5}" height="${y(0)-y(g)}" fill="var(--gas)"><title>${t} gas ${g.toFixed(2)} kWh</title></rect><rect x="${x+bw/2}" y="${y(e)}" width="${bw/2-.5}" height="${y(0)-y(e)}" fill="var(--elec)"><title>${t} electricity ${e.toFixed(2)} kWh</title></rect>`;
     if(j%12===0)s+=`<text x="${x}" y="${H-5}">${t}</text>`}
-  s+=`<rect x="${L}" y="${T}" width="${bw*12}" height="${H-T-B}" fill="var(--ink)" opacity=".05"/></svg>`;
+  const u=m.raw.elec&&m.raw.elec.unit,base0=Date.parse(d.key+'T00:00:00Z')-2*36e5,mn=u?dayMinRate(u,Date.parse(d.key+'T12:00:00Z')):null;let cheapN=0,cheapK=0;
+  if(u&&mn!=null)for(let h=0;h<56;h++){const tt=base0+h*18e5;if(dayKey(new Date(tt))!==d.key)continue;const r=rateAt(u,tt);
+    const [hh,mm]=hm(new Date(tt)).split(':').map(Number),j=hh*2+(mm>=30?1:0);
+    if(r!=null&&r<=mn*1.01&&rateAt(u,Date.parse(d.key+'T12:00:00Z'))>mn*1.3){cheapN++;cheapK+=d.hhE[j]||0;s+=`<rect x="${L+j*bw}" y="${T}" width="${bw}" height="${H-T-B}" fill="var(--elec)" opacity=".12"/>`}}
+  if(!cheapN)s+=`<rect x="${L}" y="${T}" width="${bw*12}" height="${H-T-B}" fill="var(--ink)" opacity=".05"/>`;
+  s+='</svg>';
   $('dayChart').innerHTML=s;
-  $('daySummary').innerHTML=`Gas ${d.g.toFixed(1)} kWh (${gbp(d.gc)}), of which ${d.night.toFixed(1)} kWh overnight (shaded) · Electricity ${d.e.toFixed(1)} kWh from the grid (${gbp(d.ec)}) · Total ${gbp(d.cost)}`;
+  $('daySummary').innerHTML=`Gas ${d.g.toFixed(1)} kWh (${gbp(d.gc)}), of which ${d.night.toFixed(1)} kWh overnight${cheapN?'':' (shaded)'} · Electricity ${d.e.toFixed(1)} kWh from the grid (${gbp(d.ec)})${cheapN?`, ${d.e?Math.round(cheapK/d.e*100):0}% in the cheap-rate hours (shaded blue)`:''} · Total ${gbp(d.cost)}`;
 }
 
 function priceSmart(m,days,unit,sc){
@@ -433,14 +488,26 @@ function renderTariff(m,days){
   const now=new Date(),r=[],n=days.length;
   if(m.raw.elec)r.push(['Electricity',(rateAt(m.raw.elec.unit,now)||0).toFixed(2)+'p/kWh · '+(rateAt(m.raw.elec.sc,now)||0).toFixed(2)+'p/day']);
   if(m.raw.gas)r.push(['Gas',(rateAt(m.raw.gas.unit,now)||0).toFixed(2)+'p/kWh · '+(rateAt(m.raw.gas.sc,now)||0).toFixed(2)+'p/day']);
-  let h=`<h3>Now: Flexible Octopus</h3><table>${r.map(x=>`<tr><td>${x[0]}</td><td class="n">${x[1]}</td></tr>`).join('')}</table>`;
+  const ti=tariffInfo(m);
+  if(ti.tou&&m.raw.elec)r[0]=['Electricity',`${(ti.cheapRate*100).toFixed(2)}p cheap hours · ${(ti.dayRate*100).toFixed(2)}p other times · ${(rateAt(m.raw.elec.sc,now)||0).toFixed(2)}p/day`];
+  let h=`<h3>Now: ${esc(ti.curName||'current tariff')}</h3><table>${r.map(x=>`<tr><td>${x[0]}</td><td class="n">${x[1]}</td></tr>`).join('')}</table>`;
+  for(const c of ti.changes){const k=dayKey(new Date(c.from)),after=m.days.filter(d=>d.complete&&d.key>=k),before=m.days.filter(d=>d.complete&&d.key<k).slice(-14);
+    if(!after.length){h+=`<p class="sub">Switched to ${esc(c.name)} on ${niceDay(k)}. Readings from then will appear in a day or two, and the comparison below will follow.</p>`;continue}
+    const avg=(a,f)=>a.reduce((s,x)=>s+f(x),0)/a.length,cheapShare=a=>{let ck=0,tk=0;for(const d of a){const mn=dayMinRate(m.raw.elec.unit,Date.parse(d.key+'T12:00:00Z'));const b0=Date.parse(d.key+'T00:00:00Z')-2*36e5;
+      for(let h2=0;h2<56;h2++){const tt=b0+h2*18e5;if(dayKey(new Date(tt))!==d.key)continue;const [hh,mm]=hm(new Date(tt)).split(':').map(Number),j=hh*2+(mm>=30?1:0),e=d.hhE[j]||0;tk+=e;if(rateAt(m.raw.elec.unit,tt)<=mn*1.01)ck+=e}}return tk?ck/tk:0};
+    h+=`<h3>Since switching to ${esc(c.name)} (${niceDay(k)})</h3><table><tr><th></th><th class="n">Before</th><th class="n">After</th></tr>
+      <tr><td>Electricity cost a day</td><td class="n">${gbp(avg(before,d=>d.ec))}</td><td class="n"><b>${gbp(avg(after,d=>d.ec))}</b></td></tr>
+      <tr><td>Grid electricity a day</td><td class="n">${avg(before,d=>d.e).toFixed(1)} kWh</td><td class="n">${avg(after,d=>d.e).toFixed(1)} kWh</td></tr>
+      <tr><td>Price paid per kWh</td><td class="n">${(avg(before,d=>d.ec)/Math.max(0.01,avg(before,d=>d.e))*100).toFixed(1)}p</td><td class="n">${(avg(after,d=>d.ec)/Math.max(0.01,avg(after,d=>d.e))*100).toFixed(1)}p</td></tr>
+      ${ti.tou?`<tr><td>Share used in the cheap hours</td><td class="n">–</td><td class="n">${Math.round(cheapShare(after)*100)}%</td></tr>`:''}</table>
+      <p class="sub">${after.length} day${after.length>1?'s':''} on ${esc(c.name)} against the ${before.length} days before. Standing charges included. The more of the electricity that falls in the cheap hours, the lower the price per kWh.</p>`}
   if(m.raw.elec&&n>=14){
-    const rows=[['Flexible Octopus (now)','',m.raw.elec.unit,m.raw.elec.sc]].concat((m.raw.alts||[]).map(a=>[a.name,a.name==='Octopus Go'?'*':a.name==='Octopus Flux'?'**':'',a.unit,a.sc]));
+    const rows=[[ti.changes.length?'What she actually paid':`${ti.curName||'Current tariff'} (now)`,'',m.raw.elec.unit,m.raw.elec.sc]].concat((m.raw.alts||[]).map(a=>[a.name,a.name==='Octopus Go'?(/\bgo\b/i.test(ti.curName)?' (her tariff)':'*'):a.name==='Octopus Flux'?'**':'',a.unit,a.sc]));
     const priced=rows.map(([nm,mk,u,sc])=>({nm,mk,v:priceSmart(m,days,u,sc)})).filter(x=>x.v);
     const base=priced[0]&&priced[0].v.asis;
     h+=`<h3>Electricity on Octopus tariffs, last ${n} days</h3><table><tr><th>Tariff</th><th class="n">As used</th><th class="n">Cheap-hours charging†</th></tr>`+
       priced.map((x,i)=>`<tr><td>${esc(x.nm)}${x.mk}</td><td class="n">${gbp(x.v.asis)}</td><td class="n"><b>${gbp(x.v.smart)}</b>${base&&i>0?`<div class="sub">${x.v.smart<base?'saves '+gbp(base-x.v.smart):'+'+gbp(x.v.smart-base).slice(1)}</div>`:''}</td></tr>`).join('')+
-      `</table><p class="sub">* Octopus Go needs Octopus to accept the car. Its registration check uses the DVLA, so a Jersey-registered car fails until it's re-registered in the UK.<br>** Octopus Flux needs a solar installation certificate (MCS, or Octopus's route for systems without one).<br>† The car charged at full 7 kW in the cheapest night half-hours, and the house battery (${Number(cfg.batt)||0} kWh usable) charged overnight to cover dearer hours. Solar export income on Flux isn't included.</p>`}
+      `</table><p class="sub">${/\bgo\b/i.test(ti.curName)?'':`* Octopus Go needs Octopus to accept the car. Its registration check uses the DVLA, so a Jersey-registered car fails until it's re-registered in the UK.<br>`}** Octopus Flux needs a solar installation certificate (MCS, or Octopus's route for systems without one).<br>† The car charged at full 7 kW in the cheapest night half-hours, and the house battery (${Number(cfg.batt)||0} kWh usable) charged overnight to cover dearer hours. Solar export income on Flux isn't included.</p>`}
   // gas and fixed deals
   const gT=days.reduce((s,d)=>s+d.g,0),eT=days.reduce((s,d)=>s+d.e,0);
   if(m.raw.gas&&n>=14){const gu=(rateAt(m.raw.gas.unit,now)||0),gs=(rateAt(m.raw.gas.sc,now)||0);const flexG=(gT*gu+n*gs)/100;
@@ -457,7 +524,7 @@ function renderTariff(m,days){
   if(m.raw.elec&&n>=14){const base=priceSmart(m,days,m.raw.elec.unit,m.raw.elec.sc);
     const rows=EXT.map(x=>{const fn=t=>{const hr=hourOf(t);return (x.a<x.b?(hr>=x.a&&hr<x.b):(hr>=x.a||hr<x.b))?x.off:x.peak};return {x,v:priceSmart(m,days,fn,()=>x.sc)}}).filter(r=>r.v);
     h+=`<h3>Other suppliers' EV tariffs, last ${n} days‡</h3><table><tr><th>Tariff</th><th class="n">As used</th><th class="n">Cheap-hours charging†</th></tr>`+
-      (base?`<tr><td>Flexible Octopus (now)</td><td class="n">${gbp(base.asis)}</td><td class="n">${gbp(base.asis)}</td></tr>`:'')+
+      (base?`<tr><td>${tariffInfo(m).changes.length?'What she actually paid':esc(tariffInfo(m).curName||'Current tariff')+' (now)'}</td><td class="n">${gbp(base.asis)}</td><td class="n">${gbp(base.asis)}</td></tr>`:'')+
       rows.map(r=>`<tr><td>${esc(r.x.nm)}*<div class="sub">${r.x.off}p ${String(r.x.a).padStart(2,'0')}:00–${String(r.x.b).padStart(2,'0')}:00 · ${r.x.peak}p other times · ${r.x.sc}p/day</div></td><td class="n">${gbp(r.v.asis)}</td><td class="n"><b>${gbp(r.v.smart)}</b>${base?`<div class="sub">${r.v.smart<base.asis?'saves '+gbp(base.asis-r.v.smart):'+'+gbp(r.v.smart-base.asis).slice(1)}</div>`:''}</td></tr>`).join('')+
       `</table><p class="sub">* EV tariffs may need a UK-registered car.<br>‡ Published prices from comparison sites, mid-November 2026. Prices vary by region and change often, and some may still include 5% VAT, which is 0% on electricity at the moment. Check a quote for the postcode before switching.</p>`}
   if(m.raw.gas&&n>=14){const gu=(rateAt(m.raw.gas.unit,now)||0),gs=(rateAt(m.raw.gas.sc,now)||0);const flexG=(gT*gu+n*gs)/100;
@@ -522,14 +589,19 @@ const hddDay=k=>{const y=+k.slice(0,4),mo=+k.slice(5,7);return HDD[mo-1]/new Dat
 function compareHeaters(m,win,ge,ee){
   const sum=(a,f)=>a.reduce((s,x)=>s+f(x),0);
   const dayG=sum(win,d=>{let v=0;for(let j=18;j<32;j++)v+=d.hhG[j]||0;return v})/(win.length*7);
-  const rows=[['Gas central heating, whole house (her daytime average)',dayG*ge],['Dyson Hot+Cool on full heat (about 2 kW)',2*ee],['Dyson on its thermostat in a small room (about 1 kW average)',1*ee],['Heated throw or electric blanket (about 0.1 kW)',0.1*ee]];
+  const ti=tariffInfo(m);if(ti.tou&&ti.dayRate)ee=ti.dayRate;const rows=[['Gas central heating, whole house (her daytime average)',dayG*ge],['Dyson Hot+Cool on full heat (about 2 kW)',2*ee],['Dyson on its thermostat in a small room (about 1 kW average)',1*ee],['Heated throw or electric blanket (about 0.1 kW)',0.1*ee]];
   return `<h3>Cost per hour to keep warm</h3><table>${rows.map(r=>`<tr><td>${r[0]}</td><td class="n">${(r[1]*100).toFixed(0)}p</td></tr>`).join('')}</table>
   <p class="sub">Electricity costs about ${(ee/ge).toFixed(1)} times as much per unit as gas, so the Dyson is only cheaper if the central heating is turned right down and she heats just one room. A heated throw at the desk is the cheapest way to stay warm.</p>`;
 }
 function renderDD(m,done){
   const now=new Date(),sum=(a,f)=>a.reduce((s,x)=>s+f(x),0);
   const ge=m.raw.gas?(rateAt(m.raw.gas.unit,now)||0)/100:0, gs=m.raw.gas?(rateAt(m.raw.gas.sc,now)||0)/100:0;
-  const ee=m.raw.elec?(rateAt(m.raw.elec.unit,now)||0)/100:0, es=m.raw.elec?(rateAt(m.raw.elec.sc,now)||0)/100:0;
+  const es=m.raw.elec?(rateAt(m.raw.elec.sc,now)||0)/100:0;
+  // effective price per kWh: recent half-hours priced on the current tariff (matters for time-of-use tariffs)
+  let ee=m.raw.elec?(rateAt(m.raw.elec.unit,now)||0)/100:0;
+  if(m.raw.elec&&m.raw.elec.curUnit&&m.raw.elec.curUnit.length){const keys=new Set(done.slice(-30).map(d=>d.key));let k=0,c=0;
+    for(const r of m.raw.elec.hh||[]){const t=Date.parse(r.interval_start);if(!keys.has(dayKey(new Date(t))))continue;const p=rateAt(m.raw.elec.curUnit,t);if(p==null)continue;k+=r.consumption;c+=r.consumption*p/100}
+    if(k>5)ee=c/k}
   const base=Number(cfg.baseGas||2.7), win=done.slice(-28);
   if(win.length<14){$('ddCard').innerHTML='<p class="sub">Needs at least two weeks of readings.</p>';$('saveCard').innerHTML='';return}
   const heatWin=sum(win,d=>Math.max(0,d.g-base)), share=sum(win,d=>hddDay(d.key))/HDD_YEAR;
@@ -543,7 +615,7 @@ function renderDD(m,done){
   $('kpiDD').innerHTML=`<div class="l">Suggested Direct Debit</div><div class="v">£${sugg}</div><div class="l">a month</div>`;
   $('ddCard').innerHTML=`<div class="kpis" style="margin:0 0 8px"><div class="kpi" style="box-shadow:none;background:var(--bg)"><div class="l">Suggested</div><div class="v">£${sugg}</div><div class="l">a month</div></div><div class="kpi" style="box-shadow:none;background:var(--bg)"><div class="l">Paying now</div><div class="v">${gbp(Number(cfg.dd)||0)}</div><div class="l">${sugg>(Number(cfg.dd)||0)?'short by '+gbp(sugg-(Number(cfg.dd)||0))+' a month':'enough'}</div></div></div>
   <table><tr><td>Gas, next 12 months at ${Number(cfg.temp)}°C</td><td class="n">${Math.round(aGas).toLocaleString('en-GB')} kWh · ${gbp(aGas*ge+365*gs)}</td></tr>
-  <tr><td>Electricity from the grid</td><td class="n">${Math.round(aElec).toLocaleString('en-GB')} kWh · ${gbp(aElec*ee+365*es)}</td></tr>
+  <tr><td>Electricity from the grid${tariffInfo(m).tou?`<div class="sub">on ${esc(tariffInfo(m).curName)}, averaging ${(ee*100).toFixed(1)}p/kWh at her recent pattern</div>`:''}</td><td class="n">${Math.round(aElec).toLocaleString('en-GB')} kWh · ${gbp(aElec*ee+365*es)}</td></tr>
   <tr><td>Year in total</td><td class="n">${gbp(year)}</td></tr>
   <tr><td>Balance to ${bal<0?'clear':'use up'} over 12 months</td><td class="n">${gbp(-bal)}</td></tr>
   <tr><td>If prices rise 25% on 1 January, as suppliers forecast</td><td class="n">£${riseSugg} a month</td></tr>
@@ -584,8 +656,12 @@ function renderDD(m,done){
    const v=R>0&&U<R?heatCost*dayShare*(1-U/R)*0.5+heatCost*0.03:heatCost*0.05;
    ys.push([`Smart radiator valves${R?` on ${R} radiators, heating ${U} in the day`:''}`,v,`Rooms left off still lose some heat to the rest of the house, so this counts half the saving, plus 3% from better control. Fitting ${R||13} valves costs roughly £${(R||13)*31}–£${(R||13)*75} plus a hub. Turning ordinary radiator valves down to 1–2 in unused rooms is free`]);}
   if(m.raw.elec&&done.length>=14){const d30=done.slice(-30),base=priceSmart(m,d30,m.raw.elec.unit,m.raw.elec.sc);
-    for(const [nm,mk,why] of [['Octopus Flux','**','needs the solar installation certificate'],['Octopus Go','*','needs Octopus to accept the Jersey-registered car']]){const a=(m.raw.alts||[]).find(x=>x.name===nm);if(!a||!base)continue;
-      const v=priceSmart(m,d30,a.unit,a.sc);if(v&&v.smart<base.asis)ys.push([`Switch electricity to ${nm}${mk}, charge the car and battery in its cheap hours`,(base.asis-v.smart)*365/d30.length,`${mk} ${why}. Uses the last ${d30.length} days of readings`])}}
+    const ti=tariffInfo(m),onCur=nm=>ti.curName&&ti.curName.toLowerCase().replace(/\s+/g,' ').includes(nm.toLowerCase());
+    let ref=base?base.asis:0;
+    if(ti.tou&&m.raw.elec.curUnit&&m.raw.elec.curUnit.length){const cv=priceSmart(m,d30,m.raw.elec.curUnit,m.raw.elec.curSc||m.raw.elec.sc);
+      if(cv){ref=cv.smart;const sv=(cv.asis-cv.smart)*365/d30.length;if(sv>10)ys.push([`Use ${esc(ti.curName)}'s cheap hours fully: car and house battery charged only then`,sv,`Compares her last ${d30.length} days on ${esc(ti.curName)} prices as used, against the car at full 7 kW and the battery charging only in the cheap window`])}}
+    for(const [nm,mk,why] of [['Octopus Flux','**','needs the solar installation certificate'],['Octopus Go','*','needs Octopus to accept the Jersey-registered car']]){const a=(m.raw.alts||[]).find(x=>x.name===nm);if(!a||!base||onCur(nm))continue;
+      const v=priceSmart(m,d30,a.unit,a.sc);if(v&&v.smart<ref-5*d30.length/365)ys.push([`Switch electricity to ${nm}${mk}, charge the car and battery in its cheap hours`,(ref-v.smart)*365/d30.length,`${mk} ${why}. Uses the last ${d30.length} days of readings${ti.tou?', compared with making full use of '+esc(ti.curName):''}`])}}
   ys.sort((a,b)=>b[1]-a[1]);
   $('saveCard').innerHTML='<table><tr><th>Change</th><th class="n">A year</th><th class="n">A month</th></tr>'+ys.map(y=>`<tr><td>${y[0]}<div class="sub">${y[2]}</div></td><td class="n">${gbp(y[1])}</td><td class="n">${gbp(y[1]/12)}</td></tr>`).join('')+'</table><p class="sub">Savings overlap, so they don\'t simply add up. For example, a lower thermostat also cuts the overnight figure.</p>'+compareHeaters(m,win,ge,ee);
 }
