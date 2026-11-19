@@ -93,7 +93,7 @@ html,body{height:100%;overflow:hidden;overscroll-behavior:none}
       <button class="nav" data-go="uses"><span class="ni">%</span>What it's used for</button>
       <button class="nav" data-go="weather"><span class="ni">☼</span>Weather</button>
       <button class="nav" data-go="tariff"><span class="ni">⇄</span>Tariffs</button>
-      <button class="nav" data-go="alerts"><span class="ni">!</span>Alerts <span id="alertCount"></span></button>
+      <button class="nav" data-go="confirmed"><span class="ni">✓</span>Savings so far<span id="alertCount" class="hidden"></span></button>
     </nav>
   </div>
 </section>
@@ -110,12 +110,13 @@ html,body{height:100%;overflow:hidden;overscroll-behavior:none}
   <div id="dayChart"></div><div id="daySummary" class="sub" style="margin-top:6px"></div></div></section>
 <section class="screen" id="s-bands"><header class="bar"><button class="back">‹ Back</button><h2>Time of day, last 30 days</h2></header><div class="body"><div id="bands"></div></div></section>
 <section class="screen" id="s-uses"><header class="bar"><button class="back">‹ Back</button><h2>What it's used for</h2></header><div class="body"><div id="uses"></div></div></section>
+<section class="screen" id="s-confirmed"><header class="bar"><button class="back">‹ Back</button><h2>Savings so far</h2></header><div class="body"><div id="confirmed"></div></div></section>
 <section class="screen" id="s-weather"><header class="bar"><button class="back">‹ Back</button><h2>Heating vs weather</h2></header><div class="body"><div id="weather"><p class="sub">Loading weather…</p></div></div></section>
 <section class="screen" id="s-tariff"><header class="bar"><button class="back">‹ Back</button><h2>Tariffs</h2></header><div class="body"><div id="tariff"></div>
   <p class="sub" id="dataNote"></p><p class="sub">Octopus publishes smart-meter readings once a day, and gas usually a day after electricity, so the latest day can be up to two days old. Costs include VAT and standing charges.</p></div></section>
 
 <section class="screen" id="s-settings"><header class="bar"><button class="back">‹ Back</button><h2>Settings</h2></header><div class="body">
-  <p class="sub">Saved only on this phone. The API key is on the Octopus website: Personal details → Developer settings → API access.</p>
+  <p class="sub">Page version <span id="ver"></span>. Saved only on this phone. The API key is on the Octopus website: Personal details → Developer settings → API access.</p>
   <label for="fKey">API key</label>
   <input id="fKey" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="sk_live_…">
   <label for="fAcct">Account number</label>
@@ -126,6 +127,10 @@ html,body{height:100%;overflow:hidden;overscroll-behavior:none}
   <input id="fBal" type="number" inputmode="decimal" step="0.01" placeholder="-239.65">
   <label for="fTemp">Thermostat setting (°C)</label>
   <input id="fTemp" type="number" inputmode="decimal" step="0.5">
+  <label for="fTempPrev">Thermostat before the last change (°C)</label>
+  <input id="fTempPrev" type="number" inputmode="decimal" step="0.5">
+  <label for="fTempDate">Date it was changed</label>
+  <input id="fTempDate" type="date">
   <label for="fBatt">House battery usable capacity (kWh)</label>
   <input id="fBatt" type="number" inputmode="decimal" step="0.5">
   <label for="fOut">Hours a week the house is empty in the day</label>
@@ -151,12 +156,18 @@ html,body{height:100%;overflow:hidden;overscroll-behavior:none}
 <script>
 (function(){
 'use strict';
+const VERSION='2026-11-19c';
 const API='https://api.octopus.energy/v1';
-const DEF={key:'',acct:'',dd:105,gasFactor:11.36,bal:0,baseGas:2.7,temp:21,batt:9,loc:'53.65,-1.78',hoursOut:18,rads:13,radsDay:4,dysonKw:2,heaterKw:2};
+(function selfUpdate(){try{fetch(location.pathname+'?v='+Date.now(),{cache:'no-store'}).then(r=>r.text()).then(t=>{const m=t.match(/const VERSION='([^']+)'/);
+  if(m&&m[1]!==VERSION&&sessionStorage.getItem('he_reloaded')!==m[1]){sessionStorage.setItem('he_reloaded',m[1]);location.reload()}}).catch(()=>{})}catch(e){}})();
+const DEF={key:'',acct:'',dd:105,gasFactor:11.36,bal:0,baseGas:2.7,temp:21,batt:9,loc:'53.65,-1.78',hoursOut:18,rads:13,radsDay:4,dysonKw:2,heaterKw:2,tempPrev:21,tempDate:''};
 const TZ='Europe/London';
 const $=id=>document.getElementById(id);
 const store={get(k){try{return JSON.parse(localStorage.getItem(k))}catch(e){return null}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}},del(k){try{localStorage.removeItem(k)}catch(e){}}};
-let cfg=Object.assign({},DEF,store.get('he_cfg')||{});
+const storedCfg=store.get('he_cfg');
+let cfg=Object.assign({},DEF,storedCfg||{});
+if(storedCfg&&storedCfg.tempDate===undefined){ // she turned the heating down to 17°C on 19 Nov 2026
+  const t=Number(storedCfg.temp)||21;cfg.tempPrev=t<21?21:t;cfg.temp=t<21?t:17;cfg.tempDate='2026-11-19';store.set('he_cfg',cfg)}
 let model=null, selDay=null;
 
 const dayFmt=new Intl.DateTimeFormat('en-CA',{timeZone:TZ,year:'numeric',month:'2-digit',day:'2-digit'});
@@ -331,6 +342,7 @@ function render(m){
   renderTariff(m,done.slice(-30));
   renderMix(m,done.slice(-30));
   renderDD(m,done);
+  renderConfirmed();
 }
 
 // --- chart helpers (thin marks, 4px rounded data-ends, recessive grid) ---
@@ -663,6 +675,62 @@ function goAdvice(m,done){
   <table><tr><th>To do</th><th class="n">Saves a month</th></tr>${steps.map(x=>`<tr><td><b>${x[0]}</b><div class="sub">${x[2]}</div></td><td class="n">${x[1]==null?'–':gbp(x[1])}</td></tr>`).join('')}</table>
   <h3>Other ways to save</h3>`;
 }
+function thermoChange(){const a=Number(cfg.tempPrev),b=Number(cfg.temp),d=cfg.tempDate;
+  if(!d||!a||!b||a===b)return null;return {from:a,to:b,date:d,factor:Math.pow(0.9,a-b)}}
+function goSaving(m,done){
+  const ti=tariffInfo(m);if(!m.raw.elec||!m.raw.elec.prev||!ti.cur)return null;
+  const since=dayKey(new Date(ti.cur.from)),D=done.filter(d=>d.key>=since&&d.ne>=46);if(!D.length)return {since,name:ti.curName,prev:m.raw.elec.prev.name,n:0};
+  const keys=new Set(D.map(d=>d.key));let pc=0,ac=0;
+  for(const r of m.raw.elec.hh||[]){const t=Date.parse(r.interval_start);if(!keys.has(dayKey(new Date(t))))continue;const p=rateAt(m.raw.elec.prev.unit,t),q=rateAt(m.raw.elec.unit,t);if(p==null||q==null)return null;pc+=r.consumption*p/100;ac+=r.consumption*q/100}
+  const sc=(L,d)=>(rateAt(L,Date.parse(d.key+'T12:00:00Z'))||0)/100;
+  pc+=D.reduce((s,d)=>s+sc(m.raw.elec.prev.sc,d),0);ac+=D.reduce((s,d)=>s+sc(m.raw.elec.sc,d),0);
+  return {since,name:ti.curName,prev:m.raw.elec.prev.name,n:D.length,saved:pc-ac,prevCost:pc,cost:ac};
+}
+function renderConfirmed(){
+  const m=model,el=$('confirmed');if(!m||!el)return;
+  const done=m.days.filter(d=>d.complete),tc=thermoChange();
+  const ge=m.raw.gas?(rateAt(m.raw.gas.unit,new Date())||0)/100:0,base=Number(cfg.baseGas)||2.7;
+  let h='',total=0,monthly=0;const lastData=done.length?done[done.length-1].key:'';
+  // 1. thermostat
+  if(tc){
+    const pctEst=1-tc.factor,after=done.filter(d=>d.key>=tc.date&&d.ng>=46);
+    const pre=done.filter(d=>d.key<tc.date&&d.ng>=46).slice(-45);
+    const preHeat=pre.slice(-28).reduce((s,d)=>s+Math.max(0,d.g-base),0)/Math.max(1,Math.min(28,pre.length));
+    const estMonth=preHeat*30*pctEst*ge;
+    h+=`<h3 style="margin-top:0">Thermostat ${tc.from}°C → ${tc.to}°C</h3><p class="sub" style="margin-top:0">Changed ${niceDay(tc.date)}. Expected saving about ${Math.round(pctEst*100)}% of heating (roughly 10% per degree), which at recent use is about <b>${gbp(estMonth)} a month</b> this time of year.</p>`;
+    if(tc.to<18)h+=`<p class="sub">Health guidance (UK Health Security Agency) is to keep rooms she's sitting in at 18°C or more. Smart radiator valves can keep the study warmer while the rest of the house stays at ${tc.to}°C.</p>`;
+    const w=m.weather;
+    if(!after.length){h+=`<p>Waiting for readings from ${niceDay(tc.date)}. Octopus sends them a day or two late${lastData?` (latest complete day: ${niceDay(lastData)})`:''}.</p>`;monthly+=estMonth}
+    else if(w&&Object.keys(w.temps).length){
+      const pts=pre.filter(d=>w.temps[d.key]!=null).map(d=>[w.temps[d.key],d.g]),fit=linreg(pts.filter(p=>p[0]<15))||linreg(pts);
+      if(fit&&fit.b<0){
+        const rows=after.filter(d=>w.temps[d.key]!=null).map(d=>{const exp=Math.max(base,fit.a+fit.b*w.temps[d.key]);return {d,exp,act:d.g,t:w.temps[d.key]}});
+        const sk=rows.reduce((s,r)=>s+(r.exp-r.act),0),se=rows.reduce((s,r)=>s+r.exp,0),sv=sk*ge;total+=sv;
+        const pm=rows.length?sv/rows.length*30:0;monthly+=rows.length>=3?pm:estMonth;
+        const W=600,H=230,L=36,B=30,T=12,mx=niceMax(Math.max(...rows.map(r=>Math.max(r.exp,r.act)),1)*1.1),bw=(W-L)/Math.max(rows.length,7),Y=v=>T+(H-T-B)*(1-v/mx);
+        let svg=`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Gas used each day against what the old setting would have used">`+grid(L,W,[0,mx/2,mx].map(v=>[v,Y(v)]),v=>v);
+        rows.forEach((r,i)=>{const x=L+i*bw+bw*0.15,w2=bw*0.7;
+          svg+=`<path d="${bar(x,Y(r.act),w2,Y(0)-Y(r.act))}" fill="var(--gas)"><title>${niceDay(r.d.key)}: ${r.act.toFixed(0)} kWh used; about ${r.exp.toFixed(0)} kWh expected at ${tc.from}°C for ${r.t.toFixed(0)}°C outside</title></path>`;
+          svg+=`<line x1="${x-3}" x2="${x+w2+3}" y1="${Y(r.exp)}" y2="${Y(r.exp)}" stroke="var(--ink)" stroke-width="2.5"/>`;
+          svg+=`<text x="${x+w2/2}" y="${H-10}" text-anchor="middle">${niceDay(r.d.key).split(' ')[1]}</text>`});
+        svg+='</svg>';
+        h+=`<div class="legend"><span><i class="dot" style="background:var(--gas)"></i>Gas used</span><span><i class="dot" style="background:var(--ink)"></i>Expected at ${tc.from}°C for the weather</span></div>${svg}
+        <p>${sk>=0?`<b>Saved about ${sk.toFixed(0)} kWh (${gbp(sv)})</b>`:`<b>Used ${(-sk).toFixed(0)} kWh more than expected</b>`} over ${rows.length} day${rows.length>1?'s':''}: ${se?Math.abs(Math.round(sk/se*100)):0}% ${sk>=0?'less':'more'} gas than the old setting would have used in the same weather.${rows.length>=3?` That's about <b>${gbp(pm)} a month</b> at this time of year.`:' A few more days will firm this up.'}</p>`;
+      } else {h+=`<p class="sub">Not enough cold days before the change to compare against yet.</p>`;monthly+=estMonth}
+    } else {
+      const bAvg=pre.slice(-7).reduce((s,d)=>s+d.g,0)/Math.max(1,pre.slice(-7).length),aAvg=after.reduce((s,d)=>s+d.g,0)/after.length;
+      h+=`<p>Gas averaged ${aAvg.toFixed(0)} kWh a day since the change, against ${bAvg.toFixed(0)} kWh in the week before. Open the Weather screen once so the page can allow for colder or milder days.</p>`;monthly+=estMonth}
+  } else h+=`<p class="sub">To track a thermostat change, enter the old setting and the date in Settings.</p>`;
+  // 2. tariff
+  const gs=goSaving(m,done);
+  if(gs){h+=`<h3>${esc(gs.name)} instead of ${esc(gs.prev)}</h3>`;
+    if(!gs.n)h+=`<p>Switched ${niceDay(gs.since)}. Waiting for readings from then.</p>`;
+    else{total+=gs.saved;monthly+=gs.saved/gs.n*30;
+      h+=`<p>${gs.saved>=0?`<b>Saved ${gbp(gs.saved)}</b>`:`<b>Cost ${gbp(-gs.saved)} more</b>`} in ${gs.n} day${gs.n>1?'s':''} (${gbp(gs.cost)} on ${esc(gs.name)} against ${gbp(gs.prevCost)} on ${esc(gs.prev)} for the same electricity). ${gs.saved<0?'Moving the car and battery charging into the cheap hours turns this into a saving.':''}</p>`}}
+  h=`<div class="kpis" style="margin:0 0 12px"><div class="kpi" style="box-shadow:none;background:var(--bg)"><div class="l">Confirmed so far</div><div class="v">${gbp(total)}</div><div class="l">from her readings</div></div><div class="kpi" style="box-shadow:none;background:var(--bg)"><div class="l">At this rate</div><div class="v">${gbp(monthly)}</div><div class="l">a month</div></div></div>`+h+
+    `<p class="sub">"Confirmed" means worked out from her actual readings: gas against what the old thermostat setting would have used in the same weather, and electricity against her old tariff's prices. Where readings haven't arrived yet, the monthly figure uses the estimate.</p>`;
+  el.innerHTML=h;
+}
 function renderDD(m,done){
   const now=new Date(),sum=(a,f)=>a.reduce((s,x)=>s+f(x),0);
   const ge=m.raw.gas?(rateAt(m.raw.gas.unit,now)||0)/100:0, gs=m.raw.gas?(rateAt(m.raw.gas.sc,now)||0)/100:0;
@@ -675,7 +743,8 @@ function renderDD(m,done){
   if(!ee)ee=elecDayPrice(m);
   const base=Number(cfg.baseGas||2.7), win=done.slice(-28);
   if(win.length<14){$('ddCard').innerHTML='<p class="sub">Needs at least two weeks of readings.</p>';$('saveCard').innerHTML='';return}
-  const heatWin=sum(win,d=>Math.max(0,d.g-base)), share=sum(win,d=>hddDay(d.key))/HDD_YEAR;
+  const tc=thermoChange(),fT=tc?tc.factor:1;
+  const heatWin=sum(win,d=>Math.max(0,d.g-base)*(tc&&d.key<tc.date?fT:1)), share=sum(win,d=>hddDay(d.key))/HDD_YEAR;
   const aHeat=share>0?heatWin/share:0, aGas=aHeat+base*365;
   const eDays=done.slice(-365), aElec=eDays.length?sum(eDays,d=>d.e)/eDays.length*365:0;
   const year=aGas*ge+365*gs+aElec*ee+365*es, bal=Number(cfg.bal)||0;
@@ -740,7 +809,7 @@ function renderDD(m,done){
 let weatherBusy=false;
 function loadWeather(){if(weatherBusy)return;weatherBusy=true;
   fetchWeather().then(w=>{weatherBusy=false;if(!model)return;
-    if(w&&Object.keys(w.temps).length){model.weather=w;renderWeather(model,w)}
+    if(w&&Object.keys(w.temps).length){model.weather=w;renderWeather(model,w);renderConfirmed()}
     else{const el=$('weather');if(el)el.innerHTML='<p class="sub">Couldn\'t reach the weather service (Open-Meteo). It needs an internet connection; try again later.</p>'}}).catch(()=>{weatherBusy=false})}
 function setStatus(t,busy){$('status').innerHTML=(busy?'<span class="spin"></span>':'')+t}
 async function refresh(){
@@ -753,7 +822,7 @@ async function refresh(){
     $('dataNote').textContent='Latest readings from Octopus: gas to '+lastT(raw.gas&&raw.gas.hh)+', electricity to '+lastT(raw.elec&&raw.elec.hh)+'.';return true}
   catch(e){const msg=(e&&e.message)||'Could not reach Octopus.';setStatus('Not updated: '+esc(/fetch|network|load/i.test(msg)?'no connection to Octopus.':msg));$('setupErr').textContent=msg;return false}
 }
-function fillSettings(){$('fKey').value=cfg.key||'';$('fAcct').value=cfg.acct||'';$('fDD').value=cfg.dd;$('fGas').value=cfg.gasFactor;$('fBal').value=cfg.bal;$('fTemp').value=cfg.temp;$('fBatt').value=cfg.batt;$('fLoc').value=cfg.loc||DEF.loc;$('fOut').value=cfg.hoursOut??18;$('fRads').value=cfg.rads??13;$('fRadsDay').value=cfg.radsDay??4;$('fDy').value=cfg.dysonKw??2;$('fPh').value=cfg.heaterKw??2}
+function fillSettings(){try{$('ver').textContent=VERSION}catch(e){}$('fKey').value=cfg.key||'';$('fAcct').value=cfg.acct||'';$('fDD').value=cfg.dd;$('fGas').value=cfg.gasFactor;$('fBal').value=cfg.bal;$('fTemp').value=cfg.temp;$('fTempPrev').value=cfg.tempPrev??'';$('fTempDate').value=cfg.tempDate||'';$('fBatt').value=cfg.batt;$('fLoc').value=cfg.loc||DEF.loc;$('fOut').value=cfg.hoursOut??18;$('fRads').value=cfg.rads??13;$('fRadsDay').value=cfg.radsDay??4;$('fDy').value=cfg.dysonKw??2;$('fPh').value=cfg.heaterKw??2}
 function showSetup(){go('settings')}
 function showHome(){$('connect').classList.toggle('hidden',!!model);$('home').classList.toggle('hidden',!model)}
 // screens: one per hash, so the phone's own back button works too
@@ -765,7 +834,8 @@ function go(id){if(id==='home'){back();return}depth++;location.hash=id}
 function back(){if(depth>0){depth--;history.back()}else{history.replaceState(null,'',location.pathname+location.search);show()}}
 window.addEventListener('hashchange',()=>{if(!location.hash)depth=0;show()});
 document.addEventListener('click',e=>{const t=e.target.closest('[data-go]');if(t){go(t.dataset.go);return}if(e.target.closest('.back'))back()});
-$('btnSave').onclick=async()=>{cfg=Object.assign({},DEF,{key:$('fKey').value.trim(),acct:$('fAcct').value.trim().toUpperCase(),dd:Number($('fDD').value)||0,gasFactor:Number($('fGas').value)||0,bal:Number($('fBal').value)||0,temp:Number($('fTemp').value)||21,batt:Number($('fBatt').value)||0,loc:($('fLoc').value.trim()||DEF.loc),hoursOut:Number($('fOut').value)||0,rads:Number($('fRads').value)||0,radsDay:Number($('fRadsDay').value)||0,dysonKw:Number($('fDy').value)||2,heaterKw:Number($('fPh').value)||2});
+$('btnSave').onclick=async()=>{const oldT=Number(cfg.temp);cfg=Object.assign({},DEF,{tempPrev:Number($('fTempPrev').value)||oldT,tempDate:$('fTempDate').value||'',key:$('fKey').value.trim(),acct:$('fAcct').value.trim().toUpperCase(),dd:Number($('fDD').value)||0,gasFactor:Number($('fGas').value)||0,bal:Number($('fBal').value)||0,temp:Number($('fTemp').value)||21,batt:Number($('fBatt').value)||0,loc:($('fLoc').value.trim()||DEF.loc),hoursOut:Number($('fOut').value)||0,rads:Number($('fRads').value)||0,radsDay:Number($('fRadsDay').value)||0,dysonKw:Number($('fDy').value)||2,heaterKw:Number($('fPh').value)||2});
+  if(Number(cfg.temp)!==oldT&&oldT&&!$('fTempDate').value){cfg.tempPrev=oldT;cfg.tempDate=dayKey(new Date())}
   if(!cfg.key||!cfg.acct){$('setupErr').textContent='Enter the API key and account number.';return}
   store.set('he_cfg',cfg);$('setupErr').textContent='Loading…';if(await refresh()){$('setupErr').textContent='';showHome();back()}};
 $('btnForget').onclick=()=>{cfg=Object.assign({},DEF);store.del('he_cfg');store.del('he_cache');model=null;fillSettings();showHome();setStatus('Key removed from this phone.')};
