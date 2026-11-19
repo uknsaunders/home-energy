@@ -134,6 +134,10 @@ html,body{height:100%;overflow:hidden;overscroll-behavior:none}
   <input id="fRads" type="number" inputmode="numeric" step="1">
   <label for="fRadsDay">Radiators needed in the day (rooms she uses)</label>
   <input id="fRadsDay" type="number" inputmode="numeric" step="1">
+  <label for="fDy">Dyson heater power (kW)</label>
+  <input id="fDy" type="number" inputmode="decimal" step="0.1">
+  <label for="fPh">Portable heater power (kW, on its label)</label>
+  <input id="fPh" type="number" inputmode="decimal" step="0.1">
   <label for="fLoc">Weather location (latitude, longitude)</label>
   <input id="fLoc" autocomplete="off" placeholder="53.65, -1.78">
   <label for="fGas">Gas: kWh per m³ (from the bill; 0 if the meter reports kWh)</label>
@@ -148,7 +152,7 @@ html,body{height:100%;overflow:hidden;overscroll-behavior:none}
 (function(){
 'use strict';
 const API='https://api.octopus.energy/v1';
-const DEF={key:'',acct:'',dd:105,gasFactor:11.36,bal:0,baseGas:2.7,temp:21,batt:9,loc:'53.65,-1.78',hoursOut:18,rads:13,radsDay:4};
+const DEF={key:'',acct:'',dd:105,gasFactor:11.36,bal:0,baseGas:2.7,temp:21,batt:9,loc:'53.65,-1.78',hoursOut:18,rads:13,radsDay:4,dysonKw:2,heaterKw:2};
 const TZ='Europe/London';
 const $=id=>document.getElementById(id);
 const store={get(k){try{return JSON.parse(localStorage.getItem(k))}catch(e){return null}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}},del(k){try{localStorage.removeItem(k)}catch(e){}}};
@@ -589,12 +593,33 @@ function renderMix(m,days){
 // recent heating use into a whole-year figure.
 const HDD=[340,300,280,210,140,80,45,50,90,170,260,320], HDD_YEAR=HDD.reduce((a,b)=>a+b,0);
 const hddDay=k=>{const y=+k.slice(0,4),mo=+k.slice(5,7);return HDD[mo-1]/new Date(Date.UTC(y,mo,0)).getUTCDate()};
+// Daytime electricity price, with fallbacks so a gap in the tariff data never shows 0p
+function elecDayPrice(m){
+  const e=m.raw.elec;if(!e)return 0;const noon=Date.parse(dayKey(new Date())+'T12:00:00Z');
+  for(const L of [e.unit,e.curUnit]){const r=rateAt(L,noon);if(r)return r/100}
+  for(const L of [e.curUnit,e.unit]){if(L&&L.length){const last=L.slice().sort((x,y)=>Date.parse(y.valid_from)-Date.parse(x.valid_from)).find(r=>r.value_inc_vat>0);if(last)return last.value_inc_vat/100}}
+  const d=m.days.filter(x=>x.complete&&x.e>1).slice(-7);const k=d.reduce((s,x)=>s+x.e,0);return k?d.reduce((s,x)=>s+x.ec,0)/k:0;
+}
 function compareHeaters(m,win,ge,ee){
   const sum=(a,f)=>a.reduce((s,x)=>s+f(x),0);
-  const dayG=sum(win,d=>{let v=0;for(let j=18;j<32;j++)v+=d.hhG[j]||0;return v})/(win.length*7);
-  const ti=tariffInfo(m);if(ti.tou&&ti.dayRate)ee=ti.dayRate;const rows=[['Gas central heating, whole house (her daytime average)',dayG*ge],['Dyson Hot+Cool on full heat (about 2 kW)',2*ee],['Dyson on its thermostat in a small room (about 1 kW average)',1*ee],['Heated throw or electric blanket (about 0.1 kW)',0.1*ee]];
-  return `<h3>Cost per hour to keep warm</h3><table>${rows.map(r=>`<tr><td>${r[0]}</td><td class="n">${(r[1]*100).toFixed(0)}p</td></tr>`).join('')}</table>
-  <p class="sub">Electricity costs about ${(ee/ge).toFixed(1)} times as much per unit as gas, so the Dyson is only cheaper if the central heating is turned right down and she heats just one room. A heated throw at the desk is the cheapest way to stay warm.</p>`;
+  const dayG=sum(win,d=>{let v=0;for(let j=18;j<32;j++)v+=d.hhG[j]||0;return v})/(win.length*7),gasHour=dayG*ge;
+  const ti=tariffInfo(m),p=elecDayPrice(m)||ee;
+  const dy=Number(cfg.dysonKw)||2,ph=Number(cfg.heaterKw)||2;
+  const rows=[
+    ['Gas central heating, whole house','her daytime average',gasHour],
+    [`Dyson Hot+Cool, full heat`,`${dy} kW`,dy*p],
+    [`Dyson on its thermostat, one room`,`about half the time, ${(dy/2).toFixed(1)} kW average`,dy/2*p],
+    [`Portable electric heater, full heat`,`${ph} kW`,ph*p],
+    [`Portable heater on its thermostat, one room`,`about half the time, ${(ph/2).toFixed(1)} kW average`,ph/2*p],
+    ['Heated throw or electric blanket','about 0.1 kW',0.1*p]];
+  const B=Number(cfg.batt)||0;
+  if(ti.tou&&ti.cheapRate&&B>0)rows.splice(5,0,[`Either heater on its thermostat, run from the house battery`,`battery charged overnight at ${(ti.cheapRate*100).toFixed(1)}p; ${B} kWh lasts about ${Math.round(B/Math.max(0.5,ph/2))} hours at ${(ph/2).toFixed(1)} kW`,ph/2*ti.cheapRate]);
+  const breakeven=p?gasHour/p:0;
+  return `<h3>Cost per hour to keep warm</h3>
+  <p class="sub" style="margin-top:0">Electricity at ${(p*100).toFixed(1)}p per kWh${ti.tou?` (${esc(ti.curName)} daytime rate)`:''}, gas at ${(ge*100).toFixed(1)}p. Every plug-in heater turns electricity into heat equally well, so a ${ph} kW portable heater costs exactly the same per hour as a ${dy} kW Dyson. The Dyson's advantages are its thermostat and fan, not cheaper heat.</p>
+  <table>${rows.map(r=>`<tr><td>${r[0]}<div class="sub">${r[1]}</div></td><td class="n">${(r[2]*100).toFixed(0)}p</td></tr>`).join('')}</table>
+  <p><b>Is one heated room cheaper?</b> Only if the central heating is turned off (or the other radiators right down) and the heater averages less than about <b>${breakeven.toFixed(1)} kW</b>. That's ${gbp(gasHour)} an hour of gas divided by ${(p*100).toFixed(0)}p per kWh. A heater on its thermostat in a small, closed room can manage that; on full heat it can't. Running a heater <i>as well as</i> the central heating always costs more.</p>${ti.tou&&B>0?`<p><b>The battery changes the sums on ${esc(ti.curName)}.</b> Heater power taken from a battery charged overnight costs ${(ti.cheapRate*100).toFixed(1)}p per kWh, so one room heated that way is cheaper than whole-house gas. The catch is that the same battery is meant to cover the evening, so anything it spends on the heater is bought back at ${(p*100).toFixed(0)}p later.</p>`:''}
+  <p class="sub">The cheapest options are smart radiator valves (gas heat in only the rooms she uses) or a heated throw at the desk.</p>`;
 }
 function goAdvice(m,done){
   const ti=tariffInfo(m);if(!ti.tou||!m.raw.elec)return '';
@@ -647,6 +672,7 @@ function renderDD(m,done){
   if(m.raw.elec&&m.raw.elec.curUnit&&m.raw.elec.curUnit.length){const keys=new Set(done.slice(-30).map(d=>d.key));let k=0,c=0;
     for(const r of m.raw.elec.hh||[]){const t=Date.parse(r.interval_start);if(!keys.has(dayKey(new Date(t))))continue;const p=rateAt(m.raw.elec.curUnit,t);if(p==null)continue;k+=r.consumption;c+=r.consumption*p/100}
     if(k>5)ee=c/k}
+  if(!ee)ee=elecDayPrice(m);
   const base=Number(cfg.baseGas||2.7), win=done.slice(-28);
   if(win.length<14){$('ddCard').innerHTML='<p class="sub">Needs at least two weeks of readings.</p>';$('saveCard').innerHTML='';return}
   const heatWin=sum(win,d=>Math.max(0,d.g-base)), share=sum(win,d=>hddDay(d.key))/HDD_YEAR;
@@ -727,7 +753,7 @@ async function refresh(){
     $('dataNote').textContent='Latest readings from Octopus: gas to '+lastT(raw.gas&&raw.gas.hh)+', electricity to '+lastT(raw.elec&&raw.elec.hh)+'.';return true}
   catch(e){const msg=(e&&e.message)||'Could not reach Octopus.';setStatus('Not updated: '+esc(/fetch|network|load/i.test(msg)?'no connection to Octopus.':msg));$('setupErr').textContent=msg;return false}
 }
-function fillSettings(){$('fKey').value=cfg.key||'';$('fAcct').value=cfg.acct||'';$('fDD').value=cfg.dd;$('fGas').value=cfg.gasFactor;$('fBal').value=cfg.bal;$('fTemp').value=cfg.temp;$('fBatt').value=cfg.batt;$('fLoc').value=cfg.loc||DEF.loc;$('fOut').value=cfg.hoursOut??18;$('fRads').value=cfg.rads??13;$('fRadsDay').value=cfg.radsDay??4}
+function fillSettings(){$('fKey').value=cfg.key||'';$('fAcct').value=cfg.acct||'';$('fDD').value=cfg.dd;$('fGas').value=cfg.gasFactor;$('fBal').value=cfg.bal;$('fTemp').value=cfg.temp;$('fBatt').value=cfg.batt;$('fLoc').value=cfg.loc||DEF.loc;$('fOut').value=cfg.hoursOut??18;$('fRads').value=cfg.rads??13;$('fRadsDay').value=cfg.radsDay??4;$('fDy').value=cfg.dysonKw??2;$('fPh').value=cfg.heaterKw??2}
 function showSetup(){go('settings')}
 function showHome(){$('connect').classList.toggle('hidden',!!model);$('home').classList.toggle('hidden',!model)}
 // screens: one per hash, so the phone's own back button works too
@@ -739,7 +765,7 @@ function go(id){if(id==='home'){back();return}depth++;location.hash=id}
 function back(){if(depth>0){depth--;history.back()}else{history.replaceState(null,'',location.pathname+location.search);show()}}
 window.addEventListener('hashchange',()=>{if(!location.hash)depth=0;show()});
 document.addEventListener('click',e=>{const t=e.target.closest('[data-go]');if(t){go(t.dataset.go);return}if(e.target.closest('.back'))back()});
-$('btnSave').onclick=async()=>{cfg=Object.assign({},DEF,{key:$('fKey').value.trim(),acct:$('fAcct').value.trim().toUpperCase(),dd:Number($('fDD').value)||0,gasFactor:Number($('fGas').value)||0,bal:Number($('fBal').value)||0,temp:Number($('fTemp').value)||21,batt:Number($('fBatt').value)||0,loc:($('fLoc').value.trim()||DEF.loc),hoursOut:Number($('fOut').value)||0,rads:Number($('fRads').value)||0,radsDay:Number($('fRadsDay').value)||0});
+$('btnSave').onclick=async()=>{cfg=Object.assign({},DEF,{key:$('fKey').value.trim(),acct:$('fAcct').value.trim().toUpperCase(),dd:Number($('fDD').value)||0,gasFactor:Number($('fGas').value)||0,bal:Number($('fBal').value)||0,temp:Number($('fTemp').value)||21,batt:Number($('fBatt').value)||0,loc:($('fLoc').value.trim()||DEF.loc),hoursOut:Number($('fOut').value)||0,rads:Number($('fRads').value)||0,radsDay:Number($('fRadsDay').value)||0,dysonKw:Number($('fDy').value)||2,heaterKw:Number($('fPh').value)||2});
   if(!cfg.key||!cfg.acct){$('setupErr').textContent='Enter the API key and account number.';return}
   store.set('he_cfg',cfg);$('setupErr').textContent='Loading…';if(await refresh()){$('setupErr').textContent='';showHome();back()}};
 $('btnForget').onclick=()=>{cfg=Object.assign({},DEF);store.del('he_cfg');store.del('he_cache');model=null;fillSettings();showHome();setStatus('Key removed from this phone.')};
