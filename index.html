@@ -71,6 +71,46 @@ html,body{height:100%;overflow:hidden;overscroll-behavior:none}
 .ni{font-size:20px;color:var(--accent);line-height:1}
 #alertCount{color:var(--warn)}
 .clamp1{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:62vw}
+
+.tiles{flex:1;display:grid;grid-template-columns:1fr 1fr;grid-auto-rows:1fr;gap:10px;min-height:0}
+.tile{position:relative;text-align:left;background:var(--card);color:var(--ink);border-radius:16px;padding:10px 12px;box-shadow:0 1px 2px rgba(0,0,0,.06);display:flex;flex-direction:column;justify-content:space-between;min-height:0;overflow:hidden;font-weight:400;border:2px solid transparent;transition:transform .08s}
+.tile:active{transform:scale(.98)}
+.tile .l{font-size:12px;color:var(--muted)}
+.tile .v{font-size:24px;font-weight:700;margin:1px 0;letter-spacing:-.3px}
+.tile .s{font-size:12px;color:var(--muted);line-height:1.25}
+.tile .chev{position:absolute;right:10px;top:8px;color:var(--muted);font-size:18px}
+.tile svg{margin-top:4px;max-height:34px}
+.tile.sel{border-color:var(--accent)}
+.good{color:var(--accent)!important}.bad{color:var(--warn)!important}
+.mini{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.mini button{background:var(--card);color:var(--ink);border-radius:12px;padding:8px 4px;font-size:12.5px;font-weight:600;display:flex;flex-direction:column;align-items:center;gap:2px;box-shadow:0 1px 2px rgba(0,0,0,.06)}
+.mini .ni{font-size:16px}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 8px}
+.chip{border:1.5px solid var(--line);background:var(--card);color:var(--ink);border-radius:999px;padding:6px 11px;font-size:13px;font-weight:600}
+.chip.on{background:var(--accent);border-color:var(--accent);color:#fff}
+details{border-top:1px solid var(--line);padding:2px 0}
+details>summary span:last-child{white-space:nowrap;margin-left:auto}
+details>summary{list-style:none;cursor:pointer;padding:10px 0;display:flex;justify-content:space-between;gap:10px;font-weight:600}
+details>summary::-webkit-details-marker{display:none}
+details>summary:after{content:'\203a';color:var(--muted);transition:transform .15s;margin-left:6px}
+details[open]>summary:after{transform:rotate(90deg)}
+details .sub{margin:0 0 10px}
+.sect{margin-top:14px;border:1px solid var(--line);border-radius:12px;padding:0 12px}
+.sect>summary{font-size:16px}
+.big{display:flex;gap:10px;margin:2px 0 6px}
+.big>div{flex:1;background:var(--bg);border-radius:12px;padding:10px 12px}
+.big .v{font-size:22px;font-weight:700}.big .l{font-size:12px;color:var(--muted)}
+/* ---------- desktop: dashboard with the tiles on the left and the detail on the right ---------- */
+@media (min-width:900px){
+  #s-home{display:flex!important;right:auto;width:400px;border-right:1px solid var(--line)}
+  .screen:not(#s-home){left:400px;padding-left:28px;padding-right:28px}
+  .screen:not(#s-home) .back{visibility:hidden;width:0;padding:0}
+  .bar h2{text-align:left;padding-right:0;font-size:20px}
+  .body{max-width:980px}
+  .body svg{max-height:440px}
+  .tile .v{font-size:24px}
+  .tile:hover{border-color:var(--line)}.tile.sel:hover{border-color:var(--accent)}
+}
 </style>
 </head>
 <body>
@@ -84,16 +124,19 @@ html,body{height:100%;overflow:hidden;overscroll-behavior:none}
   <div id="connect" class="hidden card" style="text-align:center"><p>Connect to Octopus to see the readings.</p><button data-go="settings">Connect</button></div>
   <div id="home" class="hidden homebody">
     <button class="strip" data-go="alerts" id="homeAlert"></button>
-    <div class="kpis" id="kpis"></div>
-    <nav class="grid">
-      <button class="nav" data-go="dd"><span class="ni">£</span>Direct Debit</button>
-      <button class="nav" data-go="save"><span class="ni">↓</span>Ways to save</button>
-      <button class="nav" data-go="daily"><span class="ni">▥</span>Cost per day</button>
-      <button class="nav" data-go="bands"><span class="ni">◷</span>Time of day</button>
-      <button class="nav" data-go="uses"><span class="ni">%</span>What it's used for</button>
-      <button class="nav" data-go="weather"><span class="ni">☼</span>Weather</button>
-      <button class="nav" data-go="tariff"><span class="ni">⇄</span>Tariffs</button>
-      <button class="nav" data-go="confirmed"><span class="ni">✓</span>Savings so far<span id="alertCount" class="hidden"></span></button>
+    <div class="tiles">
+      <button class="tile" data-go="day" id="t-day"></button>
+      <button class="tile" data-go="daily" id="t-week"></button>
+      <button class="tile" data-go="dd" id="t-dd"></button>
+      <button class="tile" data-go="confirmed" id="t-saved"></button>
+      <button class="tile" data-go="save" id="t-save"></button>
+      <button class="tile" data-go="weather" id="t-weather"></button>
+    </div>
+    <nav class="mini">
+      <button data-go="bands"><span class="ni">◷</span>Time of day</button>
+      <button data-go="uses"><span class="ni">%</span>Uses</button>
+      <button data-go="tariff"><span class="ni">⇄</span>Tariffs</button>
+      <button data-go="alerts"><span class="ni">!</span>Alerts<span id="alertCount"></span></button>
     </nav>
   </div>
 </section>
@@ -117,10 +160,13 @@ html,body{height:100%;overflow:hidden;overscroll-behavior:none}
 
 <section class="screen" id="s-settings"><header class="bar"><button class="back">‹ Back</button><h2>Settings</h2></header><div class="body">
   <p class="sub">Page version <span id="ver"></span>. Saved only on this phone. The API key is on the Octopus website: Personal details → Developer settings → API access.</p>
+  <div id="credSummary" class="big hidden"><div><div class="l">Connected to Octopus</div><div style="font-weight:700;margin:2px 0" id="credText"></div><button class="ghost" id="btnEditCred" style="padding:6px 0">Change account or API key</button></div></div>
+  <div id="credEdit">
   <label for="fKey">API key</label>
   <input id="fKey" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="sk_live_…">
   <label for="fAcct">Account number</label>
   <input id="fAcct" autocapitalize="characters" placeholder="A-1234567A">
+  </div>
   <label for="fDD">Monthly Direct Debit (£)</label>
   <input id="fDD" type="number" inputmode="decimal" step="1">
   <label for="fBal">Account balance from the latest bill (£, minus if owed)</label>
@@ -149,6 +195,15 @@ html,body{height:100%;overflow:hidden;overscroll-behavior:none}
   <input id="fGas" type="number" inputmode="decimal" step="0.01">
   <div class="row" style="margin-top:14px"><button id="btnSave">Save and load</button><button class="ghost" id="btnForget">Forget key</button></div>
   <p class="err" id="setupErr"></p>
+  <details class="sect"><summary>Keep these settings safe</summary>
+    <p class="sub">The settings stay on this phone until the browser's data is cleared. In DuckDuckGo the flame (Fire) button clears it, unless the site is fireproofed: open the page, tap ⋮ and choose <b>Fireproof site</b>. Adding the page to the home screen also helps.</p>
+    <p class="sub">As a backup, copy a setup code and keep it somewhere private, such as a password manager. Paste it back here to restore everything in one go. It contains the API key, so treat it like a password.</p>
+    <div class="row"><button id="btnCopyCode">Copy setup code</button></div>
+    <label for="fCode">Restore from a setup code</label>
+    <input id="fCode" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Paste the code here">
+    <div class="row" style="margin-top:8px"><button class="ghost" id="btnRestore">Restore</button></div>
+    <p class="sub" id="codeMsg"></p>
+  </details>
 </div></section>
 
 </div>
@@ -156,7 +211,7 @@ html,body{height:100%;overflow:hidden;overscroll-behavior:none}
 <script>
 (function(){
 'use strict';
-const VERSION='2026-11-19c';
+const VERSION='2026-11-20a';
 const API='https://api.octopus.energy/v1';
 (function selfUpdate(){try{fetch(location.pathname+'?v='+Date.now(),{cache:'no-store'}).then(r=>r.text()).then(t=>{const m=t.match(/const VERSION='([^']+)'/);
   if(m&&m[1]!==VERSION&&sessionStorage.getItem('he_reloaded')!==m[1]){sessionStorage.setItem('he_reloaded',m[1]);location.reload()}}).catch(()=>{})}catch(e){}})();
@@ -166,8 +221,14 @@ const $=id=>document.getElementById(id);
 const store={get(k){try{return JSON.parse(localStorage.getItem(k))}catch(e){return null}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}},del(k){try{localStorage.removeItem(k)}catch(e){}}};
 const storedCfg=store.get('he_cfg');
 let cfg=Object.assign({},DEF,storedCfg||{});
+// backup copy in IndexedDB, and ask the browser not to evict this site's storage
+const idb={open(){return new Promise((ok,no)=>{try{const r=indexedDB.open('home-energy',1);r.onupgradeneeded=()=>r.result.createObjectStore('kv');r.onsuccess=()=>ok(r.result);r.onerror=()=>no(r.error)}catch(e){no(e)}})},
+  async set(k,v){try{const d=await idb.open();d.transaction('kv','readwrite').objectStore('kv').put(v,k)}catch(e){}},
+  async get(k){try{const d=await idb.open();return await new Promise(ok=>{const r=d.transaction('kv').objectStore('kv').get(k);r.onsuccess=()=>ok(r.result);r.onerror=()=>ok(null)})}catch(e){return null}}};
+function saveCfg(){store.set('he_cfg',cfg);idb.set('he_cfg',cfg)}
+try{navigator.storage&&navigator.storage.persist&&navigator.storage.persist()}catch(e){}
 if(storedCfg&&storedCfg.tempDate===undefined){ // she turned the heating down to 17°C on 19 Nov 2026
-  const t=Number(storedCfg.temp)||21;cfg.tempPrev=t<21?21:t;cfg.temp=t<21?t:17;cfg.tempDate='2026-11-19';store.set('he_cfg',cfg)}
+  const t=Number(storedCfg.temp)||21;cfg.tempPrev=t<21?21:t;cfg.temp=t<21?t:17;cfg.tempDate='2026-11-19';saveCfg()}
 let model=null, selDay=null;
 
 const dayFmt=new Intl.DateTimeFormat('en-CA',{timeZone:TZ,year:'numeric',month:'2-digit',day:'2-digit'});
@@ -329,13 +390,13 @@ function render(m){
   if(!al.length) al.push('<span class="alert-ok"><b>Nothing unusual</b> in the latest readings.</span>');
   renderAlerts();
 
-  // kpis
-  const k=(l,v,s)=>`<div class="kpi"><div class="l">${l}</div><div class="v">${v}</div><div class="l">${s}</div></div>`;
-  $('kpis').innerHTML=
-    k('Latest full day',gbp(last.cost),`${niceDay(last.key)} · gas ${last.g.toFixed(0)} kWh · elec ${last.e.toFixed(1)} kWh`)+
-    k('Last 7 days',gbp(last7.reduce((s,d)=>s+d.cost,0)),`avg ${gbp(daily7)} a day`+spark(done.slice(-14).map(d=>d.cost)))+
-    k('Month at this rate',gbp(proj),cfg.dd>0?`Direct Debit ${gbp(Number(cfg.dd))}`:'')+`<div class="kpi" id="kpiDD"></div>`;
-
+  // home tiles
+  const prevAvg=done.slice(-14,-7).reduce((s,d)=>s+d.cost,0)/Math.max(1,done.slice(-14,-7).length);
+  const ch=prevAvg?(daily7/prevAvg-1)*100:0;
+  const split=(g,e)=>{const t=g+e||1,W=120;return `<svg viewBox="0 0 ${W} 10" aria-hidden="true" style="width:100%"><rect x="0" y="0" width="${Math.max(2,g/t*W-1)}" height="10" rx="3" fill="var(--gas)"/><rect x="${g/t*W+1}" y="0" width="${Math.max(2,e/t*W-1)}" height="10" rx="3" fill="var(--elec)"/></svg>`};
+  tile('t-day','Latest full day',gbp(last.cost),`${niceDay(last.key)} · gas ${gbp(last.gc)} · elec ${gbp(last.ec)}`,split(last.gc,last.ec));
+  tile('t-week','Last 7 days',gbp(last7.reduce((s,d)=>s+d.cost,0)),`${gbp(daily7)} a day <span class="${ch>0?'bad':'good'}">${ch>0?'▲':'▼'} ${Math.abs(ch).toFixed(0)}%</span> on the week before`,spark(done.slice(-14).map(d=>d.cost)));
+  placeholderTiles();
   renderDaily(m);
   if(!selDay||!m.days.find(d=>d.key===selDay)) selDay=last.key;
   renderDay();
@@ -403,6 +464,9 @@ function renderWeather(m,w){
         `</table><p class="sub">About <b>${gbp(wm.weekCost)}</b> of gas for the week, standing charge included, if the heating behaves as it has lately. Forecast from Open-Meteo for ${esc(cfg.loc||DEF.loc)}.</p>`;}
   } else h+=`<p class="sub">Not enough cold days yet to fit a trend.</p>`;
   el.innerHTML=h;
+  if(wm.fit&&wm.fcRows&&wm.fcRows.length){const ts=wm.fcRows.map(r=>r.temp),lo=Math.min(...ts),hi=Math.max(...ts),W=120,Hh=24,X=i=>i/(ts.length-1||1)*W,Yt=t=>Hh-2-(t-lo)/((hi-lo)||1)*(Hh-4);
+    tile('t-weather','Gas, next 7 days',gbp(wm.weekCost),`forecast ${lo.toFixed(0)}\u2013${hi.toFixed(0)}\u00b0C \u00b7 ${(-wm.fit.b).toFixed(0)} kWh more per \u00b0C colder`,
+      `<svg viewBox="0 0 ${W} ${Hh}" aria-hidden="true" style="width:100%"><polyline points="${ts.map((t,i)=>X(i).toFixed(1)+','+Yt(t).toFixed(1)).join(' ')}" fill="none" stroke="var(--gas)" stroke-width="2.5" stroke-linejoin="round"/></svg>`)}
   // weather-excess alert
   if(wm.fit){const d=m.days.filter(x=>x.complete&&x.ng>=46).slice(-1)[0];
     if(d&&w.temps[d.key]!=null){const exp=wm.expected(w.temps[d.key]);
@@ -410,8 +474,9 @@ function renderWeather(m,w){
       else if(d.g<exp*0.8&&exp-d.g>10)addAlert(`<span class="alert-ok"><b>Good day.</b> ${niceDay(d.key)} used ${d.g.toFixed(0)} kWh of gas against about ${exp.toFixed(0)} kWh typical for the temperature.</span>`);}}
 }
 
+function tile(id,l,v,sub,extra){const el=$(id);if(!el)return;el.innerHTML=`<span class="chev">›</span><div><div class="l">${l}</div><div class="v">${v}</div><div class="s">${sub}</div></div>${extra||''}`}
 function spark(vals){const W=120,H=22,mx=Math.max(...vals,1),bw=W/vals.length;
-  return `<svg viewBox="0 0 ${W} ${H}" style="display:block;width:100%;max-width:140px;height:22px;margin-top:5px" aria-hidden="true">`+
+  return `<svg viewBox="0 0 ${W} ${H}" style="display:block;width:100%;height:26px;margin-top:4px" aria-hidden="true">`+
     vals.map((v,i)=>`<rect x="${(i*bw+0.8).toFixed(1)}" y="${(H-v/mx*H).toFixed(1)}" width="${(bw-1.6).toFixed(1)}" height="${(v/mx*H).toFixed(1)}" rx="1" fill="var(--muted)" opacity="${i>=vals.length-7?0.95:0.45}"/>`).join('')+'</svg>';
 }
 function tariffInfo(m){
@@ -423,6 +488,7 @@ function tariffInfo(m){
   const tou=!!(u&&rateAt(u,noon)!=null&&dayMinRate(u,noon)!=null&&dayMinRate(u,noon)<rateAt(u,noon)*0.7);
   return {cur,curName:cur?cur.name:'',changes,tou,dayRate:u?(rateAt(u,noon)||0)/100:0,cheapRate:u?(dayMinRate(u,noon)||0)/100:0};
 }
+function placeholderTiles(){[['t-saved','Savings so far'],['t-save','Ways to save'],['t-weather','Gas, next 7 days']].forEach(([id,l])=>{const e=$(id);if(e&&!e.innerHTML)tile(id,l,'\u2026','working it out')})}
 function renderAlerts(){
   const al=(model&&model.alertList)||[];if(!al.length)return;
   $('alerts').innerHTML=al.map(a=>`<div class="alert${a.includes('alert-ok')?' ok':''}">${a}</div>`).join('');
@@ -650,7 +716,7 @@ function goAdvice(m,done){
   const B=Number(cfg.batt)||0,spread=Math.max(0,ti.dayRate-ti.cheapRate);
   const battK=Object.values(dearByDay).reduce((s,v)=>s+Math.min(B,v),0),battSave=battK*spread;
   const score=tot?cheap/tot:0,target=0.7;
-  try{const nb=document.querySelector('#home [data-go="save"]');if(nb)nb.innerHTML=`<span class="ni">\u2193</span>Ways to save<span class="sub" style="font-weight:400">${Math.round(score*100)}% in cheap hours</span>`}catch(e){}
+  model.goScore=score;
   let prevTxt='';
   if(live&&m.raw.elec.prev){let pc=0,ok=true;for(const r of m.raw.elec.hh||[]){const t=Date.parse(r.interval_start);if(!keys.has(dayKey(new Date(t))))continue;const p=rateAt(m.raw.elec.prev.unit,t);if(p==null){ok=false;break}pc+=r.consumption*p/100}
     const goSc=D.reduce((s,d)=>s+(rateAt(m.raw.elec.sc,Date.parse(d.key+'T12:00:00Z'))||0)/100,0),pvSc=D.reduce((s,d)=>s+(rateAt(m.raw.elec.prev.sc,Date.parse(d.key+'T12:00:00Z'))||0)/100,0);
@@ -730,6 +796,8 @@ function renderConfirmed(){
   h=`<div class="kpis" style="margin:0 0 12px"><div class="kpi" style="box-shadow:none;background:var(--bg)"><div class="l">Confirmed so far</div><div class="v">${gbp(total)}</div><div class="l">from her readings</div></div><div class="kpi" style="box-shadow:none;background:var(--bg)"><div class="l">At this rate</div><div class="v">${gbp(monthly)}</div><div class="l">a month</div></div></div>`+h+
     `<p class="sub">"Confirmed" means worked out from her actual readings: gas against what the old thermostat setting would have used in the same weather, and electricity against her old tariff's prices. Where readings haven't arrived yet, the monthly figure uses the estimate.</p>`;
   el.innerHTML=h;
+  tile('t-saved','Savings so far',gbp(total),`${total<0?'not yet · ':''}${gbp(monthly)} a month at this rate`,
+    `<svg viewBox="0 0 120 22" aria-hidden="true" style="width:100%"><circle cx="11" cy="11" r="10" fill="var(--accent)"/><path d="M6 11.5l3.2 3.2L16 8" stroke="#fff" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/><text x="28" y="15" style="font-size:12px;fill:var(--muted)">${tc?`${tc.from}\u2192${tc.to}\u00b0C`:''}${tc&&goSaving(m,done)?' + Go':''}</text></svg>`);
 }
 function renderDD(m,done){
   const now=new Date(),sum=(a,f)=>a.reduce((s,x)=>s+f(x),0);
@@ -752,7 +820,9 @@ function renderDD(m,done){
   const jan=Date.UTC(now.getUTCMonth()===0?now.getUTCFullYear():now.getUTCFullYear()+1,0,1),fr=Math.max(0,Math.min(1,(now.getTime()+365*864e5-jan)/(365*864e5)));
   const riseSugg=r5(Math.max(0,(year*(1+0.25*fr)-bal)/12));
   const eac=(m.raw.gas&&m.raw.gas.eac?m.raw.gas.eac*ge+365*gs:0)+(m.raw.elec&&m.raw.elec.eac?m.raw.elec.eac*ee+365*es:0);
-  $('kpiDD').innerHTML=`<div class="l">Suggested Direct Debit</div><div class="v">£${sugg}</div><div class="l">a month</div>`;
+  {const pay=Number(cfg.dd)||0,mx=Math.max(pay,sugg,1),W=120;
+   tile('t-dd','Direct Debit needed',`£${sugg}`,pay?`paying ${gbp(pay)} · <span class="${sugg>pay?'bad':'good'}">${sugg>pay?'short '+gbp(sugg-pay):'enough'}</span>`:'a month',
+   `<svg viewBox="0 0 ${W} 22" aria-hidden="true" style="width:100%"><rect x="0" y="0" width="${pay/mx*W}" height="9" rx="3" fill="var(--muted)"/><rect x="0" y="12" width="${sugg/mx*W}" height="9" rx="3" fill="${sugg>pay?'var(--warn)':'var(--accent)'}"/></svg>`)}
   $('ddCard').innerHTML=`<div class="kpis" style="margin:0 0 8px"><div class="kpi" style="box-shadow:none;background:var(--bg)"><div class="l">Suggested</div><div class="v">£${sugg}</div><div class="l">a month</div></div><div class="kpi" style="box-shadow:none;background:var(--bg)"><div class="l">Paying now</div><div class="v">${gbp(Number(cfg.dd)||0)}</div><div class="l">${sugg>(Number(cfg.dd)||0)?'short by '+gbp(sugg-(Number(cfg.dd)||0))+' a month':'enough'}</div></div></div>
   <table><tr><td>Gas, next 12 months at ${Number(cfg.temp)}°C</td><td class="n">${Math.round(aGas).toLocaleString('en-GB')} kWh · ${gbp(aGas*ge+365*gs)}</td></tr>
   <tr><td>Electricity from the grid${tariffInfo(m).tou?`<div class="sub">on ${esc(tariffInfo(m).curName)}, averaging ${(ee*100).toFixed(1)}p/kWh at her recent pattern</div>`:''}</td><td class="n">${Math.round(aElec).toLocaleString('en-GB')} kWh · ${gbp(aElec*ee+365*es)}</td></tr>
@@ -783,27 +853,68 @@ function renderDD(m,done){
     $('ddChart').innerHTML=`<h3>Where the account balance goes</h3>${svg}<p class="sub">Above the £0 line the account is in credit; below it, in debt. At ${gbp(Number(cfg.dd)||0)} a month the debt reaches about ${gbp(-Math.min(...cur))} at its worst. The £${sugg} line clears it within the year. Seasonal pattern from typical northern England weather.</p>`;
   })();
 
-  // savings, starting from the thermostat setting in Settings
-  const ys=[];const heatCost=aHeat*ge;
-  ys.push([`Thermostat ${Number(cfg.temp)-1}°C instead of ${Number(cfg.temp)}°C`,heatCost*0.10,'About 10% of heating per degree (Energy Saving Trust figure)']);
-  ys.push([`Thermostat ${Number(cfg.temp)-2}°C instead of ${Number(cfg.temp)}°C`,heatCost*0.20,'Two degrees, about 20% of heating']);
+  // ---------- savings: each measure as an object, so the waterfall can toggle them ----------
+  const ms=[];const heatCost=aHeat*ge;const T0=Number(cfg.temp);
+  const add=(id,short,name,annual,detail,kind)=>{if(annual>1)ms.push({id,short,name,annual,detail,kind})};
+  add('thermo',`${T0-1}°C`,`Thermostat ${T0-1}°C instead of ${T0}°C`,heatCost*0.10,'About 10% of heating per degree (Energy Saving Trust figure).','heat');
   const nightW=sum(win,d=>{let v=0;for(let j=0;j<12;j++)v+=d.hhG[j]||0;return v}), dayW=sum(win,d=>{let v=0;for(let j=18;j<32;j++)v+=d.hhG[j]||0;return v});
-  if(heatWin>0){ys.push(['Heating off midnight–6am',heatCost*Math.min(1,nightW/heatWin),`${Math.round(nightW/heatWin*100)}% of recent heating ran overnight`]);
+  if(heatWin>0){add('night','Off at night','Heating off midnight–6am',heatCost*Math.min(1,nightW/heatWin),`${Math.round(nightW/heatWin*100)}% of recent heating ran overnight. Set the boiler timer or smart thermostat to switch off at bedtime.`,'heat');
     const hrsOut=Number(cfg.hoursOut)||0,dayRate=aHeat*Math.min(1,dayW/heatWin)/(365*7);
-    if(hrsOut>0)ys.push([`Heating off when out (${hrsOut} hours a week)`,hrsOut*52*dayRate*0.6*ge,'A smart thermostat can do this automatically when her phone leaves the house. Counts 60% of the gas, because the house needs reheating']);}
-  ys.push(['Boiler flow temperature down to 60°C',(aGas*ge)*0.09,'Free. About 9% of gas (Nesta), if it is a combi boiler currently set near 80°C']);
+    if(hrsOut>0)add('out','Off when out',`Heating off when out (${hrsOut} hours a week)`,hrsOut*52*dayRate*0.6*ge,'A smart thermostat (Hive about £119, tado about £170) can do this automatically when her phone leaves the house. Counts 60% of the gas, because the house needs reheating.','heat');}
+  add('flow','Flow 60°C','Boiler flow temperature down to 60°C',(aGas*ge)*0.09,'Free: a dial on the boiler. About 9% of gas (Nesta), if it is a combi boiler currently set near 80°C.','heat');
   {const R=Number(cfg.rads)||0,U=Math.min(R,Number(cfg.radsDay)||0),dayShare=heatWin>0?Math.min(1,dayW/heatWin):0.4;
    const v=R>0&&U<R?heatCost*dayShare*(1-U/R)*0.5+heatCost*0.03:heatCost*0.05;
-   ys.push([`Smart radiator valves${R?` on ${R} radiators, heating ${U} in the day`:''}`,v,`Rooms left off still lose some heat to the rest of the house, so this counts half the saving, plus 3% from better control. Fitting ${R||13} valves costs roughly £${(R||13)*31}–£${(R||13)*75} plus a hub. Turning ordinary radiator valves down to 1–2 in unused rooms is free`]);}
+   add('valves','Rad valves',`Smart radiator valves${R?` (${R} radiators, ${U} on in the day)`:''}`,v,`Heat only the rooms she's using. Rooms left off still lose some heat to the rest of the house, so this counts half the saving, plus 3% from better control. ${R||13} valves cost roughly £${(R||13)*31}–£${(R||13)*75} plus a hub. Turning ordinary valves down to 1–2 in unused rooms is free.`,'heat');}
   if(m.raw.elec&&done.length>=14){const d30=done.slice(-30),base=priceSmart(m,d30,m.raw.elec.unit,m.raw.elec.sc);
     const ti=tariffInfo(m),onCur=nm=>ti.curName&&ti.curName.toLowerCase().replace(/\s+/g,' ').includes(nm.toLowerCase());
     let ref=base?base.asis:0;
     if(ti.tou&&m.raw.elec.curUnit&&m.raw.elec.curUnit.length){const cv=priceSmart(m,d30,m.raw.elec.curUnit,m.raw.elec.curSc||m.raw.elec.sc);
-      if(cv){ref=cv.smart;const sv=(cv.asis-cv.smart)*365/d30.length;if(sv>10)ys.push([`Use ${esc(ti.curName)}'s cheap hours fully: car and house battery charged only then`,sv,`Compares her last ${d30.length} days on ${esc(ti.curName)} prices as used, against the car at full 7 kW and the battery charging only in the cheap window`])}}
-    for(const [nm,mk,why] of [['Octopus Flux','**','needs the solar installation certificate'],['Octopus Go','*','needs Octopus to accept the Jersey-registered car']]){const a=(m.raw.alts||[]).find(x=>x.name===nm);if(!a||!base||onCur(nm))continue;
-      const v=priceSmart(m,d30,a.unit,a.sc);if(v&&v.smart<ref-5*d30.length/365)ys.push([`Switch electricity to ${nm}${mk}, charge the car and battery in its cheap hours`,(ref-v.smart)*365/d30.length,`${mk} ${why}. Uses the last ${d30.length} days of readings${ti.tou?', compared with making full use of '+esc(ti.curName):''}`])}}
-  ys.sort((a,b)=>b[1]-a[1]);
-  $('saveCard').innerHTML=goAdvice(m,done)+'<table><tr><th>Change</th><th class="n">A year</th><th class="n">A month</th></tr>'+ys.map(y=>`<tr><td>${y[0]}<div class="sub">${y[2]}</div></td><td class="n">${gbp(y[1])}</td><td class="n">${gbp(y[1]/12)}</td></tr>`).join('')+'</table><p class="sub">Savings overlap, so they don\'t simply add up. For example, a lower thermostat also cuts the overnight figure.</p>'+compareHeaters(m,win,ge,ee);
+      if(cv){ref=cv.smart;add('cheap','Cheap hours',`Use ${esc(ti.curName)}'s cheap hours fully`,(cv.asis-cv.smart)*365/d30.length,`Car charger on a 00:30–05:30 schedule at full 7 kW, and the house battery charging from the grid in the same window. Worked out from her last ${d30.length} days of readings at ${esc(ti.curName)} prices.`,'elec')}}
+    let best=null;
+    for(const [nm,mk,why] of [['Octopus Flux','**','Needs the solar installation certificate.'],['Octopus Go','*','Needs Octopus to accept the car.']]){const a=(m.raw.alts||[]).find(x=>x.name===nm);if(!a||!base||onCur(nm))continue;
+      const v=priceSmart(m,d30,a.unit,a.sc);if(v&&v.smart<ref-5*d30.length/365){const sv=(ref-v.smart)*365/d30.length;if(!best||sv>best[1])best=[nm,sv,why]}}
+    if(best)add('tariff',best[0].replace('Octopus ',''),`Switch electricity to ${best[0]}`,best[1],`${best[2]} Charge the car and battery in its cheap hours. Uses her last 30 days of readings.`,'elec');}
+  ms.sort((a,b)=>b.annual-a.annual);
+  model.save={ms,now:year/12,heatCost,bal,off:(model.save&&model.save.off)||new Set()};
+  renderSave(m,done);
+}
+// Waterfall: average month now → each chosen saving → average month after. Heating savings overlap, so each
+// heating step is taken from what's left after the steps before it.
+function waterfall(){
+  const S=model.save;const on=S.ms.filter(x=>!S.off.has(x.id));let heatLeft=S.heatCost,cost=S.now;const steps=[];
+  for(const x of on){let v=x.annual/12;if(x.kind==='heat'&&S.heatCost>0){const f=Math.min(0.9,x.annual/S.heatCost);v=heatLeft*f/12;heatLeft-=heatLeft*f}
+    steps.push({x,v});cost-=v}
+  return {steps,after:cost};
+}
+function renderSave(m,done){
+  const S=model.save,el=$('saveCard');if(!S||!el)return;
+  const {steps,after}=waterfall(),tot=S.now-after;
+  const W=380,H=250,L=34,B=40,T=22,n=steps.length+2,cw=(W-L)/n,bw=Math.min(40,cw*0.66),mx=niceMax(S.now*1.08),Y=v=>T+(H-T-B)*(1-v/mx);
+  let svg=`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Average month now, each saving, and the month after">`+grid(L,W,[0,mx/2,mx].map(v=>[v,Y(v)]),v=>'£'+Math.round(v));
+  const col=(i,top,bot,fill,lab,val,cls)=>{const x=L+i*cw+(cw-bw)/2;svg+=`<rect x="${x}" y="${Y(top)}" width="${bw}" height="${Math.max(1.5,Y(bot)-Y(top))}" rx="4" fill="${fill}"/>`;
+    svg+=`<text x="${x+bw/2}" y="${Y(top)-5}" text-anchor="middle" style="font-size:11px;font-weight:700;fill:${cls}">${val}</text>`;
+    const words=lab.split(' ');const l1=words.slice(0,Math.ceil(words.length/2)).join(' '),l2=words.slice(Math.ceil(words.length/2)).join(' ');
+    svg+=`<text x="${x+bw/2}" y="${H-24}" text-anchor="middle" style="font-size:10px">${esc(l1)}</text>${l2?`<text x="${x+bw/2}" y="${H-12}" text-anchor="middle" style="font-size:10px">${esc(l2)}</text>`:''}`};
+  col(0,S.now,0,'var(--muted)','Now',gbp(S.now).replace(/\.\d\d$/,''),'var(--ink)');
+  let run=S.now;steps.forEach((st,i)=>{const top=run;run-=st.v;
+    svg+=`<line x1="${L+i*cw+(cw+bw)/2}" x2="${L+(i+1)*cw+(cw-bw)/2}" y1="${Y(top)}" y2="${Y(top)}" stroke="var(--line)" stroke-dasharray="3 3"/>`;
+    col(i+1,top,run,'var(--accent)',st.x.short,'−'+gbp(st.v).replace(/\.\d\d$/,''),'var(--accent)')});
+  if(steps.length)svg+=`<line x1="${L+steps.length*cw+(cw+bw)/2}" x2="${L+(steps.length+1)*cw+(cw-bw)/2}" y1="${Y(run)}" y2="${Y(run)}" stroke="var(--line)" stroke-dasharray="3 3"/>`;
+  col(n-1,after,0,'var(--ink)','After',gbp(after).replace(/\.\d\d$/,''),'var(--ink)');
+  svg+='</svg>';
+  const dd=v=>Math.ceil(Math.max(0,v-S.bal/12)/5)*5;
+  el.innerHTML=`<div class="big"><div><div class="l">Average month now</div><div class="v">${gbp(S.now)}</div><div class="l">Direct Debit £${dd(S.now)}</div></div><div><div class="l">With the savings ticked</div><div class="v good">${gbp(after)}</div><div class="l">saves ${gbp(tot)} a month · DD £${dd(after)}</div></div></div>
+  <div class="sub">Tap a saving to add or remove it.</div>
+  <div class="chips">${S.ms.map(x=>`<button class="chip ${S.off.has(x.id)?'':'on'}" data-m="${x.id}">${S.off.has(x.id)?'+ ':'✓ '}${esc(x.short)}</button>`).join('')}</div>
+  ${svg}
+  <p class="sub">Heating savings overlap, so each one is worked out on what's left after the ones before it. Months are averages across the year; winter months save more.</p>
+  ${S.ms.map(x=>{const st=steps.find(z=>z.x===x);return `<details><summary><span>${x.name}</span><span class="${st?'good':''}">${st?'−'+gbp(st.v):gbp(x.annual/12)} /mo</span></summary><p class="sub">${x.detail} About ${gbp(x.annual)} a year on its own.</p></details>`}).join('')}
+  ${(()=>{const g=goAdvice(m,done);return g?`<details class="sect"><summary>Making the most of ${esc(tariffInfo(m).curName)}</summary>${g.replace('<h3>Other ways to save</h3>','').replace(/<h3 style="margin-top:0">Making the most of[^<]*<\/h3>/,'')}</details>`:''})()}
+  <details class="sect"><summary>Heaters: what an hour costs</summary>${compareHeaters(m,done.slice(-28),(rateAt(m.raw.gas.unit,new Date())||0)/100,elecDayPrice(m)).replace('<h3>Cost per hour to keep warm</h3>','')}</details>`;
+  el.querySelectorAll('.chip').forEach(c=>c.onclick=()=>{const id=c.dataset.m;S.off.has(id)?S.off.delete(id):S.off.add(id);renderSave(m,done)});
+  const ti=tariffInfo(m);
+  tile('t-save','Could save',`£${Math.round(tot)}`,`a month with ${steps.length} change${steps.length===1?'':'s'}${ti.tou&&model.goScore!=null?` · ${Math.round(model.goScore*100)}% in cheap hours`:''}`,
+    `<svg viewBox="0 0 120 26" aria-hidden="true" style="width:100%"><rect x="0" y="0" width="${120*after/S.now}" height="11" rx="3" fill="var(--accent)"/><rect x="0" y="14" width="120" height="11" rx="3" fill="var(--muted)" opacity=".5"/></svg>`);
 }
 
 let weatherBusy=false;
@@ -822,30 +933,40 @@ async function refresh(){
     $('dataNote').textContent='Latest readings from Octopus: gas to '+lastT(raw.gas&&raw.gas.hh)+', electricity to '+lastT(raw.elec&&raw.elec.hh)+'.';return true}
   catch(e){const msg=(e&&e.message)||'Could not reach Octopus.';setStatus('Not updated: '+esc(/fetch|network|load/i.test(msg)?'no connection to Octopus.':msg));$('setupErr').textContent=msg;return false}
 }
-function fillSettings(){try{$('ver').textContent=VERSION}catch(e){}$('fKey').value=cfg.key||'';$('fAcct').value=cfg.acct||'';$('fDD').value=cfg.dd;$('fGas').value=cfg.gasFactor;$('fBal').value=cfg.bal;$('fTemp').value=cfg.temp;$('fTempPrev').value=cfg.tempPrev??'';$('fTempDate').value=cfg.tempDate||'';$('fBatt').value=cfg.batt;$('fLoc').value=cfg.loc||DEF.loc;$('fOut').value=cfg.hoursOut??18;$('fRads').value=cfg.rads??13;$('fRadsDay').value=cfg.radsDay??4;$('fDy').value=cfg.dysonKw??2;$('fPh').value=cfg.heaterKw??2}
+function fillSettings(){try{$('ver').textContent=VERSION}catch(e){}
+  const has=!!(cfg.key&&cfg.acct);$('credSummary').classList.toggle('hidden',!has);$('credEdit').classList.toggle('hidden',has);
+  if(has)$('credText').textContent=`${cfg.acct} \u00b7 key ending \u2026${cfg.key.slice(-4)}`;$('fKey').value=cfg.key||'';$('fAcct').value=cfg.acct||'';$('fDD').value=cfg.dd;$('fGas').value=cfg.gasFactor;$('fBal').value=cfg.bal;$('fTemp').value=cfg.temp;$('fTempPrev').value=cfg.tempPrev??'';$('fTempDate').value=cfg.tempDate||'';$('fBatt').value=cfg.batt;$('fLoc').value=cfg.loc||DEF.loc;$('fOut').value=cfg.hoursOut??18;$('fRads').value=cfg.rads??13;$('fRadsDay').value=cfg.radsDay??4;$('fDy').value=cfg.dysonKw??2;$('fPh').value=cfg.heaterKw??2}
 function showSetup(){go('settings')}
 function showHome(){$('connect').classList.toggle('hidden',!!model);$('home').classList.toggle('hidden',!model)}
 // screens: one per hash, so the phone's own back button works too
-function show(){const id=(location.hash||'').slice(1)||'home';const el=$('s-'+id)||$('s-home');
-  document.querySelectorAll('.screen').forEach(x=>x.classList.toggle('on',x===el));
+const wide=()=>matchMedia('(min-width:900px)').matches;
+function show(){let id=(location.hash||'').slice(1)||'home';if(id==='home'&&wide())id='daily';const el=$('s-'+id)||$('s-home');
+  document.querySelectorAll('.tile,.mini button').forEach(t=>t.classList.toggle('sel',t.dataset.go===id));
+  document.querySelectorAll('.screen').forEach(x=>x.classList.toggle('on',x===el||(wide()&&x.id==='s-home')));
   if(el.id==='s-settings')fillSettings();if(el.id==='s-day'&&model)renderDay();const b=el.querySelector('.body');if(b)b.scrollTop=0}
 let depth=0;
-function go(id){if(id==='home'){back();return}depth++;location.hash=id}
+function go(id){if(id==='home'){back();return}if(wide()){history.replaceState(null,'','#'+id);show();return}depth++;location.hash=id}
+window.addEventListener('resize',()=>show());
 function back(){if(depth>0){depth--;history.back()}else{history.replaceState(null,'',location.pathname+location.search);show()}}
 window.addEventListener('hashchange',()=>{if(!location.hash)depth=0;show()});
 document.addEventListener('click',e=>{const t=e.target.closest('[data-go]');if(t){go(t.dataset.go);return}if(e.target.closest('.back'))back()});
 $('btnSave').onclick=async()=>{const oldT=Number(cfg.temp);cfg=Object.assign({},DEF,{tempPrev:Number($('fTempPrev').value)||oldT,tempDate:$('fTempDate').value||'',key:$('fKey').value.trim(),acct:$('fAcct').value.trim().toUpperCase(),dd:Number($('fDD').value)||0,gasFactor:Number($('fGas').value)||0,bal:Number($('fBal').value)||0,temp:Number($('fTemp').value)||21,batt:Number($('fBatt').value)||0,loc:($('fLoc').value.trim()||DEF.loc),hoursOut:Number($('fOut').value)||0,rads:Number($('fRads').value)||0,radsDay:Number($('fRadsDay').value)||0,dysonKw:Number($('fDy').value)||2,heaterKw:Number($('fPh').value)||2});
   if(Number(cfg.temp)!==oldT&&oldT&&!$('fTempDate').value){cfg.tempPrev=oldT;cfg.tempDate=dayKey(new Date())}
   if(!cfg.key||!cfg.acct){$('setupErr').textContent='Enter the API key and account number.';return}
-  store.set('he_cfg',cfg);$('setupErr').textContent='Loading…';if(await refresh()){$('setupErr').textContent='';showHome();back()}};
-$('btnForget').onclick=()=>{cfg=Object.assign({},DEF);store.del('he_cfg');store.del('he_cache');model=null;fillSettings();showHome();setStatus('Key removed from this phone.')};
+  saveCfg();$('setupErr').textContent='Loading…';if(await refresh()){$('setupErr').textContent='';showHome();back()}};
+$('btnEditCred').onclick=()=>{$('credEdit').classList.remove('hidden');$('credSummary').classList.add('hidden');$('fKey').focus()};
+$('btnCopyCode').onclick=async()=>{const code='HE1.'+btoa(unescape(encodeURIComponent(JSON.stringify(cfg))));
+  try{await navigator.clipboard.writeText(code);$('codeMsg').textContent='Copied. Paste it into a password manager or private note.'}catch(e){$('fCode').value=code;$('fCode').select();$('codeMsg').textContent='Copy the code from the box above.'}};
+$('btnRestore').onclick=async()=>{try{const t=$('fCode').value.trim().replace(/^HE1\./,'');const c=JSON.parse(decodeURIComponent(escape(atob(t))));
+  if(!c.key||!c.acct)throw 0;cfg=Object.assign({},DEF,c);saveCfg();fillSettings();$('codeMsg').textContent='Restored. Loading\u2026';$('fCode').value='';if(await refresh()){$('codeMsg').textContent='Restored.';showHome()}}catch(e){$('codeMsg').textContent="That code doesn't look right."}};
+$('btnForget').onclick=()=>{cfg=Object.assign({},DEF);store.del('he_cfg');store.del('he_cache');idb.set('he_cfg',null);model=null;fillSettings();showHome();setStatus('Key removed from this phone.')};
 $('prevDay').onclick=()=>{const i=model.days.findIndex(d=>d.key===selDay);if(i>0){selDay=model.days[i-1].key;renderDaily(model);renderDay()}};
 $('nextDay').onclick=()=>{const i=model.days.findIndex(d=>d.key===selDay);if(i<model.days.length-1){selDay=model.days[i+1].key;renderDaily(model);renderDay()}};
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&cfg.key&&model&&Date.now()-new Date(model.raw.fetched)>15*60e3)refresh()});
 
 if(location.hash){history.replaceState(null,'',location.pathname+location.search)}
 show();
-if(!cfg.key){setStatus('Not connected');showHome()}
+if(!cfg.key){setStatus('Not connected');showHome();idb.get('he_cfg').then(c=>{if(c&&c.key&&!cfg.key){cfg=Object.assign({},DEF,c);store.set('he_cfg',cfg);refresh().then(()=>showHome())}})}
 else{const c=store.get('he_cache');if(c){try{render(build(c));loadWeather()}catch(e){}}showHome();
   refresh().then(()=>showHome())}
 })();
