@@ -173,6 +173,8 @@ details .sub{margin:0 0 10px}
   <input id="fBal" type="number" inputmode="decimal" step="0.01" placeholder="-239.65">
   <label for="fTemp">Thermostat setting (°C)</label>
   <input id="fTemp" type="number" inputmode="decimal" step="0.5">
+  <label for="fTarget">Thermostat target for the savings estimate (°C)</label>
+  <input id="fTarget" type="number" inputmode="decimal" step="0.5" placeholder="one degree below the current setting">
   <label for="fTempPrev">Thermostat before the last change (°C)</label>
   <input id="fTempPrev" type="number" inputmode="decimal" step="0.5">
   <label for="fTempDate">Date it was changed</label>
@@ -211,7 +213,7 @@ details .sub{margin:0 0 10px}
 <script>
 (function(){
 'use strict';
-const VERSION='2026-11-20a';
+const VERSION='2026-11-20c';
 const API='https://api.octopus.energy/v1';
 (function selfUpdate(){try{fetch(location.pathname+'?v='+Date.now(),{cache:'no-store'}).then(r=>r.text()).then(t=>{const m=t.match(/const VERSION='([^']+)'/);
   if(m&&m[1]!==VERSION&&sessionStorage.getItem('he_reloaded')!==m[1]){sessionStorage.setItem('he_reloaded',m[1]);location.reload()}}).catch(()=>{})}catch(e){}})();
@@ -569,6 +571,12 @@ function priceSmart(m,days,unit,sc){
     for(const x of byDay[d].sort((a,c)=>c.p-a.p)){if(left<=0||x.p<=cheap+0.01)break;const k=Math.min(left,x.k);bsave+=k*(x.p-cheap)/100;left-=k}}
   return {asis,smart:asis-carNow+carNew-bsave};
 }
+const EXT=[
+    {nm:'EDF GoElectric',off:6.99,a:23,b:6,peak:32.0,sc:50},
+    {nm:'E.ON Next Drive Smart',off:6.5,a:0,b:6,peak:29.12,sc:60},
+    {nm:'So Energy So EV',off:7.14,a:0,b:5,peak:41.5,sc:54},
+    {nm:'British Gas EV Power',off:9.5,a:0,b:5,peak:36.5,sc:50}];
+const extRate=x=>t=>{const hr=hourOf(new Date(t));return (x.a<x.b?(hr>=x.a&&hr<x.b):(hr>=x.a||hr<x.b))?x.off:x.peak};
 function renderTariff(m,days){
   const now=new Date(),r=[],n=days.length;
   if(m.raw.elec)r.push(['Electricity',(rateAt(m.raw.elec.unit,now)||0).toFixed(2)+'p/kWh · '+(rateAt(m.raw.elec.sc,now)||0).toFixed(2)+'p/day']);
@@ -601,11 +609,7 @@ function renderTariff(m,days){
       `</table><p class="sub">Fixed prices are today's offers. Flexible follows the Ofgem price cap, which suppliers forecast to rise by roughly 20–28% on 1 January 2027. Ofgem confirms it by 25 November. If it rises that much, a fix at today's price could work out cheaper from January.</p>`}
   // Other suppliers' EV tariffs, priced on her own half-hourly readings. Published rates (VAT included) from
   // comparison sites, mid-November 2026; regional prices vary, so these are estimates.
-  const EXT=[
-    {nm:'EDF GoElectric',off:6.99,a:23,b:6,peak:32.0,sc:50},
-    {nm:'E.ON Next Drive Smart',off:6.5,a:0,b:6,peak:29.12,sc:60},
-    {nm:'So Energy So EV',off:7.14,a:0,b:5,peak:41.5,sc:54},
-    {nm:'British Gas EV Power',off:9.5,a:0,b:5,peak:36.5,sc:50}];
+
   if(m.raw.elec&&n>=14){const base=priceSmart(m,days,m.raw.elec.unit,m.raw.elec.sc);
     const rows=EXT.map(x=>{const fn=t=>{const hr=hourOf(t);return (x.a<x.b?(hr>=x.a&&hr<x.b):(hr>=x.a||hr<x.b))?x.off:x.peak};return {x,v:priceSmart(m,days,fn,()=>x.sc)}}).filter(r=>r.v);
     h+=`<h3>Other suppliers' EV tariffs, last ${n} days‡</h3><table><tr><th>Tariff</th><th class="n">As used</th><th class="n">Cheap-hours charging†</th></tr>`+
@@ -856,7 +860,7 @@ function renderDD(m,done){
   // ---------- savings: each measure as an object, so the waterfall can toggle them ----------
   const ms=[];const heatCost=aHeat*ge;const T0=Number(cfg.temp);
   const add=(id,short,name,annual,detail,kind)=>{if(annual>1)ms.push({id,short,name,annual,detail,kind})};
-  add('thermo',`${T0-1}°C`,`Thermostat ${T0-1}°C instead of ${T0}°C`,heatCost*0.10,'About 10% of heating per degree (Energy Saving Trust figure).','heat');
+  ms.push({id:'thermo',kind:'heat',short:'',name:'',annual:0,detail:''});
   const nightW=sum(win,d=>{let v=0;for(let j=0;j<12;j++)v+=d.hhG[j]||0;return v}), dayW=sum(win,d=>{let v=0;for(let j=18;j<32;j++)v+=d.hhG[j]||0;return v});
   if(heatWin>0){add('night','Off at night','Heating off midnight–6am',heatCost*Math.min(1,nightW/heatWin),`${Math.round(nightW/heatWin*100)}% of recent heating ran overnight. Set the boiler timer or smart thermostat to switch off at bedtime.`,'heat');
     const hrsOut=Number(cfg.hoursOut)||0,dayRate=aHeat*Math.min(1,dayW/heatWin)/(365*7);
@@ -865,29 +869,45 @@ function renderDD(m,done){
   {const R=Number(cfg.rads)||0,U=Math.min(R,Number(cfg.radsDay)||0),dayShare=heatWin>0?Math.min(1,dayW/heatWin):0.4;
    const v=R>0&&U<R?heatCost*dayShare*(1-U/R)*0.5+heatCost*0.03:heatCost*0.05;
    add('valves','Rad valves',`Smart radiator valves${R?` (${R} radiators, ${U} on in the day)`:''}`,v,`Heat only the rooms she's using. Rooms left off still lose some heat to the rest of the house, so this counts half the saving, plus 3% from better control. ${R||13} valves cost roughly £${(R||13)*31}–£${(R||13)*75} plus a hub. Turning ordinary valves down to 1–2 in unused rooms is free.`,'heat');}
+  model.noOct=model.noExt=null;
   if(m.raw.elec&&done.length>=14){const d30=done.slice(-30),base=priceSmart(m,d30,m.raw.elec.unit,m.raw.elec.sc);
     const ti=tariffInfo(m),onCur=nm=>ti.curName&&ti.curName.toLowerCase().replace(/\s+/g,' ').includes(nm.toLowerCase());
     let ref=base?base.asis:0;
     if(ti.tou&&m.raw.elec.curUnit&&m.raw.elec.curUnit.length){const cv=priceSmart(m,d30,m.raw.elec.curUnit,m.raw.elec.curSc||m.raw.elec.sc);
       if(cv){ref=cv.smart;add('cheap','Cheap hours',`Use ${esc(ti.curName)}'s cheap hours fully`,(cv.asis-cv.smart)*365/d30.length,`Car charger on a 00:30–05:30 schedule at full 7 kW, and the house battery charging from the grid in the same window. Worked out from her last ${d30.length} days of readings at ${esc(ti.curName)} prices.`,'elec')}}
-    let best=null;
-    for(const [nm,mk,why] of [['Octopus Flux','**','Needs the solar installation certificate.'],['Octopus Go','*','Needs Octopus to accept the car.']]){const a=(m.raw.alts||[]).find(x=>x.name===nm);if(!a||!base||onCur(nm))continue;
-      const v=priceSmart(m,d30,a.unit,a.sc);if(v&&v.smart<ref-5*d30.length/365){const sv=(ref-v.smart)*365/d30.length;if(!best||sv>best[1])best=[nm,sv,why]}}
-    if(best)add('tariff',best[0].replace('Octopus ',''),`Switch electricity to ${best[0]}`,best[1],`${best[2]} Charge the car and battery in its cheap hours. Uses her last 30 days of readings.`,'elec');}
+    const altNote=`Compared with ${esc(ti.curName||'her current tariff')}${ti.tou?' with the car and battery already in its cheap hours':''}, on her last ${d30.length} days of readings, charging in each tariff's own cheap hours.`;
+    // best Octopus alternative (all Octopus tariffs the page prices, except the one she's on)
+    let bo=null;
+    for(const a of (m.raw.alts||[])){if(onCur(a.name)||!base)continue;const v=priceSmart(m,d30,a.unit,a.sc);if(v){const sv=(ref-v.smart)*365/d30.length;if(!bo||sv>bo.sv)bo={nm:a.name,sv}}}
+    const reqs={'Octopus Flux':'Needs the solar installation certificate. Also pays for exported solar, not counted here.','Octopus Go':'Needs Octopus to accept the car.','Agile Octopus':'Prices change every half hour.'};
+    if(bo){if(bo.sv>1)add('octalt',bo.nm.replace('Octopus ','').replace(' Octopus',''),`Best Octopus alternative: ${bo.nm}`,bo.sv,`${reqs[bo.nm]||''} ${altNote}`,'tariff');
+      else model.noOct=`No other Octopus tariff beats ${ti.curName||'her current one'} for her usage (the closest, ${bo.nm}, would cost ${gbp(-bo.sv/12)} a month more).`}
+    // best other supplier (published EV tariffs, priced on her half-hours)
+    let bx=null;
+    for(const x of EXT){const v=priceSmart(m,d30,extRate(x),()=>x.sc);if(v){const sv=(ref-v.smart)*365/d30.length;if(!bx||sv>bx.sv)bx={nm:x.nm,sv,x}}}
+    if(bx){if(bx.sv>1)add('extalt',bx.nm.split(' ')[0],`Best other supplier: ${bx.nm}`,bx.sv,`${bx.x.off}p ${String(bx.x.a).padStart(2,'0')}:00–${String(bx.x.b).padStart(2,'0')}:00, ${bx.x.peak}p other times, ${bx.x.sc}p a day (published rates, mid-November 2026; get a quote for her postcode). May need a UK-registered car. ${altNote}`,'tariff');
+      else model.noExt=`No other supplier's EV tariff beats ${ti.curName||'her current one'} for her usage (the closest, ${bx.nm}, would cost ${gbp(-bx.sv/12)} a month more).`}}
   ms.sort((a,b)=>b.annual-a.annual);
-  model.save={ms,now:year/12,heatCost,bal,off:(model.save&&model.save.off)||new Set()};
+  const prevOff=model.save&&model.save.off;const off=prevOff||new Set();
+  if(!prevOff){const t=ms.filter(x=>x.kind==='tariff').sort((a,b)=>b.annual-a.annual);t.slice(1).forEach(x=>off.add(x.id))}
+  model.save={ms,now:year/12,heatCost,bal,off};
   renderSave(m,done);
 }
 // Waterfall: average month now → each chosen saving → average month after. Heating savings overlap, so each
 // heating step is taken from what's left after the steps before it.
 function waterfall(){
-  const S=model.save;const on=S.ms.filter(x=>!S.off.has(x.id));let heatLeft=S.heatCost,cost=S.now;const steps=[];
+  const S=model.save;const on=S.ms.filter(x=>!S.off.has(x.id)&&x.annual>1);let heatLeft=S.heatCost,cost=S.now;const steps=[];
   for(const x of on){let v=x.annual/12;if(x.kind==='heat'&&S.heatCost>0){const f=Math.min(0.9,x.annual/S.heatCost);v=heatLeft*f/12;heatLeft-=heatLeft*f}
     steps.push({x,v});cost-=v}
   return {steps,after:cost};
 }
+function thermoMeasure(S){const T0=Number(cfg.temp),tg=Number(cfg.targetTemp)||T0-1,d=Math.max(0,T0-tg),f=1-Math.pow(0.9,d);
+  const x=S.ms.find(z=>z.id==='thermo');if(!x)return;
+  Object.assign(x,{short:`${tg}°C`,name:`Thermostat ${tg}°C instead of ${T0}°C`,annual:d?S.heatCost*f:0,
+    detail:d?`About 10% of heating per degree (Energy Saving Trust figure), so ${d} degree${d>1?'s':''} is about ${Math.round(f*100)}%.${tg<18?' Health guidance is at least 18°C in rooms she sits in, so use radiator valves to keep the study warmer.':''}`:'Pick a lower temperature to see the saving.'})}
 function renderSave(m,done){
   const S=model.save,el=$('saveCard');if(!S||!el)return;
+  thermoMeasure(S);
   const {steps,after}=waterfall(),tot=S.now-after;
   const W=380,H=250,L=34,B=40,T=22,n=steps.length+2,cw=(W-L)/n,bw=Math.min(40,cw*0.66),mx=niceMax(S.now*1.08),Y=v=>T+(H-T-B)*(1-v/mx);
   let svg=`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Average month now, each saving, and the month after">`+grid(L,W,[0,mx/2,mx].map(v=>[v,Y(v)]),v=>'£'+Math.round(v));
@@ -904,14 +924,19 @@ function renderSave(m,done){
   svg+='</svg>';
   const dd=v=>Math.ceil(Math.max(0,v-S.bal/12)/5)*5;
   el.innerHTML=`<div class="big"><div><div class="l">Average month now</div><div class="v">${gbp(S.now)}</div><div class="l">Direct Debit £${dd(S.now)}</div></div><div><div class="l">With the savings ticked</div><div class="v good">${gbp(after)}</div><div class="l">saves ${gbp(tot)} a month · DD £${dd(after)}</div></div></div>
-  <div class="sub">Tap a saving to add or remove it.</div>
-  <div class="chips">${S.ms.map(x=>`<button class="chip ${S.off.has(x.id)?'':'on'}" data-m="${x.id}">${S.off.has(x.id)?'+ ':'✓ '}${esc(x.short)}</button>`).join('')}</div>
+  <div class="sub">Tap a saving to add or remove it. The two tariff options are alternatives, so only one can be on.</div>
+  <div class="row" style="gap:8px;margin:6px 0"><span class="sub">Thermostat target:</span><button class="chip" id="tDown">−</button><b id="tVal">${Number(cfg.targetTemp)||Number(cfg.temp)-1}°C</b><button class="chip" id="tUp">+</button><span class="sub">now ${cfg.temp}°C</span></div>
+  <div class="chips">${S.ms.filter(x=>x.annual>1).map(x=>`<button class="chip ${S.off.has(x.id)?'':'on'}" data-m="${x.id}">${S.off.has(x.id)?'+ ':'✓ '}${esc(x.short)}</button>`).join('')}</div>
   ${svg}
-  <p class="sub">Heating savings overlap, so each one is worked out on what's left after the ones before it. Months are averages across the year; winter months save more.</p>
-  ${S.ms.map(x=>{const st=steps.find(z=>z.x===x);return `<details><summary><span>${x.name}</span><span class="${st?'good':''}">${st?'−'+gbp(st.v):gbp(x.annual/12)} /mo</span></summary><p class="sub">${x.detail} About ${gbp(x.annual)} a year on its own.</p></details>`}).join('')}
+  ${[model.noOct,model.noExt].filter(Boolean).map(t=>`<p class="sub">\u2713 ${t}</p>`).join('')}
+  <p class="sub">Heating savings overlap, so each one is worked out on what's left after the ones before it. Tariff savings are measured against her current tariff used well, so they don't double-count the cheap-hours saving. Months are averages across the year; winter months save more.</p>
+  ${S.ms.filter(x=>x.annual>1).map(x=>{const st=steps.find(z=>z.x===x);return `<details><summary><span>${x.name}</span><span class="${st?'good':''}">${st?'−'+gbp(st.v):gbp(x.annual/12)} /mo</span></summary><p class="sub">${x.detail} About ${gbp(x.annual)} a year on its own.</p></details>`}).join('')}
   ${(()=>{const g=goAdvice(m,done);return g?`<details class="sect"><summary>Making the most of ${esc(tariffInfo(m).curName)}</summary>${g.replace('<h3>Other ways to save</h3>','').replace(/<h3 style="margin-top:0">Making the most of[^<]*<\/h3>/,'')}</details>`:''})()}
   <details class="sect"><summary>Heaters: what an hour costs</summary>${compareHeaters(m,done.slice(-28),(rateAt(m.raw.gas.unit,new Date())||0)/100,elecDayPrice(m)).replace('<h3>Cost per hour to keep warm</h3>','')}</details>`;
-  el.querySelectorAll('.chip').forEach(c=>c.onclick=()=>{const id=c.dataset.m;S.off.has(id)?S.off.delete(id):S.off.add(id);renderSave(m,done)});
+  const setT=d=>{const T0=Number(cfg.temp),cur=Number(cfg.targetTemp)||T0-1;cfg.targetTemp=Math.max(12,Math.min(T0,cur+d));saveCfg();S.off.delete('thermo');renderSave(m,done)};
+  $('tDown').onclick=()=>setT(-0.5);$('tUp').onclick=()=>setT(0.5);
+  el.querySelectorAll('.chip[data-m]').forEach(c=>c.onclick=()=>{const id=c.dataset.m,x=S.ms.find(z=>z.id===id);
+    if(S.off.has(id)){S.off.delete(id);if(x&&x.kind==='tariff')S.ms.filter(z=>z.kind==='tariff'&&z.id!==id).forEach(z=>S.off.add(z.id))}else S.off.add(id);renderSave(m,done)});
   const ti=tariffInfo(m);
   tile('t-save','Could save',`£${Math.round(tot)}`,`a month with ${steps.length} change${steps.length===1?'':'s'}${ti.tou&&model.goScore!=null?` · ${Math.round(model.goScore*100)}% in cheap hours`:''}`,
     `<svg viewBox="0 0 120 26" aria-hidden="true" style="width:100%"><rect x="0" y="0" width="${120*after/S.now}" height="11" rx="3" fill="var(--accent)"/><rect x="0" y="14" width="120" height="11" rx="3" fill="var(--muted)" opacity=".5"/></svg>`);
@@ -935,7 +960,7 @@ async function refresh(){
 }
 function fillSettings(){try{$('ver').textContent=VERSION}catch(e){}
   const has=!!(cfg.key&&cfg.acct);$('credSummary').classList.toggle('hidden',!has);$('credEdit').classList.toggle('hidden',has);
-  if(has)$('credText').textContent=`${cfg.acct} \u00b7 key ending \u2026${cfg.key.slice(-4)}`;$('fKey').value=cfg.key||'';$('fAcct').value=cfg.acct||'';$('fDD').value=cfg.dd;$('fGas').value=cfg.gasFactor;$('fBal').value=cfg.bal;$('fTemp').value=cfg.temp;$('fTempPrev').value=cfg.tempPrev??'';$('fTempDate').value=cfg.tempDate||'';$('fBatt').value=cfg.batt;$('fLoc').value=cfg.loc||DEF.loc;$('fOut').value=cfg.hoursOut??18;$('fRads').value=cfg.rads??13;$('fRadsDay').value=cfg.radsDay??4;$('fDy').value=cfg.dysonKw??2;$('fPh').value=cfg.heaterKw??2}
+  if(has)$('credText').textContent=`${cfg.acct} \u00b7 key ending \u2026${cfg.key.slice(-4)}`;$('fKey').value=cfg.key||'';$('fAcct').value=cfg.acct||'';$('fDD').value=cfg.dd;$('fGas').value=cfg.gasFactor;$('fBal').value=cfg.bal;$('fTemp').value=cfg.temp;$('fTempPrev').value=cfg.tempPrev??'';$('fTarget').value=cfg.targetTemp||'';$('fTempDate').value=cfg.tempDate||'';$('fBatt').value=cfg.batt;$('fLoc').value=cfg.loc||DEF.loc;$('fOut').value=cfg.hoursOut??18;$('fRads').value=cfg.rads??13;$('fRadsDay').value=cfg.radsDay??4;$('fDy').value=cfg.dysonKw??2;$('fPh').value=cfg.heaterKw??2}
 function showSetup(){go('settings')}
 function showHome(){$('connect').classList.toggle('hidden',!!model);$('home').classList.toggle('hidden',!model)}
 // screens: one per hash, so the phone's own back button works too
@@ -950,7 +975,7 @@ window.addEventListener('resize',()=>show());
 function back(){if(depth>0){depth--;history.back()}else{history.replaceState(null,'',location.pathname+location.search);show()}}
 window.addEventListener('hashchange',()=>{if(!location.hash)depth=0;show()});
 document.addEventListener('click',e=>{const t=e.target.closest('[data-go]');if(t){go(t.dataset.go);return}if(e.target.closest('.back'))back()});
-$('btnSave').onclick=async()=>{const oldT=Number(cfg.temp);cfg=Object.assign({},DEF,{tempPrev:Number($('fTempPrev').value)||oldT,tempDate:$('fTempDate').value||'',key:$('fKey').value.trim(),acct:$('fAcct').value.trim().toUpperCase(),dd:Number($('fDD').value)||0,gasFactor:Number($('fGas').value)||0,bal:Number($('fBal').value)||0,temp:Number($('fTemp').value)||21,batt:Number($('fBatt').value)||0,loc:($('fLoc').value.trim()||DEF.loc),hoursOut:Number($('fOut').value)||0,rads:Number($('fRads').value)||0,radsDay:Number($('fRadsDay').value)||0,dysonKw:Number($('fDy').value)||2,heaterKw:Number($('fPh').value)||2});
+$('btnSave').onclick=async()=>{const oldT=Number(cfg.temp);cfg=Object.assign({},DEF,{tempPrev:Number($('fTempPrev').value)||oldT,targetTemp:Number($('fTarget').value)||0,tempDate:$('fTempDate').value||'',key:$('fKey').value.trim(),acct:$('fAcct').value.trim().toUpperCase(),dd:Number($('fDD').value)||0,gasFactor:Number($('fGas').value)||0,bal:Number($('fBal').value)||0,temp:Number($('fTemp').value)||21,batt:Number($('fBatt').value)||0,loc:($('fLoc').value.trim()||DEF.loc),hoursOut:Number($('fOut').value)||0,rads:Number($('fRads').value)||0,radsDay:Number($('fRadsDay').value)||0,dysonKw:Number($('fDy').value)||2,heaterKw:Number($('fPh').value)||2});
   if(Number(cfg.temp)!==oldT&&oldT&&!$('fTempDate').value){cfg.tempPrev=oldT;cfg.tempDate=dayKey(new Date())}
   if(!cfg.key||!cfg.acct){$('setupErr').textContent='Enter the API key and account number.';return}
   saveCfg();$('setupErr').textContent='Loading…';if(await refresh()){$('setupErr').textContent='';showHome();back()}};
