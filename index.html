@@ -81,6 +81,7 @@ html,body{height:100%;overflow:hidden;overscroll-behavior:none}
 .tile .chev{position:absolute;right:10px;top:8px;color:var(--muted);font-size:18px}
 .tile svg{margin-top:4px;max-height:34px}
 .tile.sel{border-color:var(--accent)}
+.tile.wide{grid-column:span 2}
 .good{color:var(--accent)!important}.bad{color:var(--warn)!important}
 .mini{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
 .mini button{background:var(--card);color:var(--ink);border-radius:12px;padding:8px 4px;font-size:12.5px;font-weight:600;display:flex;flex-direction:column;align-items:center;gap:2px;box-shadow:0 1px 2px rgba(0,0,0,.06)}
@@ -131,6 +132,7 @@ details .sub{margin:0 0 10px}
       <button class="tile" data-go="confirmed" id="t-saved"></button>
       <button class="tile" data-go="save" id="t-save"></button>
       <button class="tile" data-go="weather" id="t-weather"></button>
+      <button class="tile wide" data-go="bands" id="t-peak"></button>
     </div>
     <nav class="mini">
       <button data-go="bands"><span class="ni">◷</span>Time of day</button>
@@ -213,7 +215,7 @@ details .sub{margin:0 0 10px}
 <script>
 (function(){
 'use strict';
-const VERSION='2026-11-20c';
+const VERSION='2026-11-25a';
 const API='https://api.octopus.energy/v1';
 (function selfUpdate(){try{fetch(location.pathname+'?v='+Date.now(),{cache:'no-store'}).then(r=>r.text()).then(t=>{const m=t.match(/const VERSION='([^']+)'/);
   if(m&&m[1]!==VERSION&&sessionStorage.getItem('he_reloaded')!==m[1]){sessionStorage.setItem('he_reloaded',m[1]);location.reload()}}).catch(()=>{})}catch(e){}})();
@@ -638,6 +640,37 @@ function hourChart(vals,color,unit,shade){
     if(h%6===0)s+=`<text x="${L+h*bw+bw/2}" y="${H-8}" text-anchor="middle">${String(h).padStart(2,'0')}:00</text>`});
   return s+'</svg>';
 }
+// Which half-hours are the cheap ones: taken from her current tariff's rates today, else Go's 00:30–05:30.
+function cheapSlots(m){const e=m.raw.elec,set=new Set();if(e){const L=(e.curUnit&&e.curUnit.length)?e.curUnit:e.unit,k=dayKey(new Date()),b0=Date.parse(k+'T00:00:00Z')-2*36e5,mn=dayMinRate(L,Date.parse(k+'T12:00:00Z')),mx=rateAt(L,Date.parse(k+'T12:00:00Z'));
+  if(mn!=null&&mx!=null&&mn<mx*0.7)for(let h=0;h<56;h++){const t=b0+h*18e5;if(dayKey(new Date(t))!==k)continue;const r=rateAt(L,t);if(r!=null&&r<=mn*1.01){const [hh,mm]=hm(new Date(t)).split(':').map(Number);set.add(hh*2+(mm>=30?1:0))}}}
+  if(!set.size)for(let j=1;j<=10;j++)set.add(j);return set}
+// Daily split of grid electricity into cheap-window and peak (everything else). The battery itself isn't in the
+// Octopus data: the meter only sees what comes from the grid, so peak kWh near zero means the battery is covering the day.
+function peakStats(m,days){const cs=cheapSlots(m);return days.map(d=>{let c=0,p=0,pc=0;
+  for(let j=0;j<48;j++){const v=d.hhE[j]||0;if(cs.has(j))c+=v;else{p+=v}}
+  const b0=Date.parse(d.key+'T00:00:00Z')-2*36e5;
+  for(let h=0;h<56;h++){const t=b0+h*18e5;if(dayKey(new Date(t))!==d.key)continue;const [hh,mm]=hm(new Date(t)).split(':').map(Number),j=hh*2+(mm>=30?1:0);if(cs.has(j))continue;const r=rateAt(m.raw.elec.unit,t);if(r!=null)pc+=(d.hhE[j]||0)*r/100}
+  return {key:d.key,cheap:c,peak:p,peakCost:pc}})}
+function peakChart(rows,H){const W=600,L=34,B=24,T=10,mx=niceMax(Math.max(1,...rows.map(r=>r.cheap+r.peak))*1.05),bw=(W-L)/rows.length,Y=v=>T+(H-T-B)*(1-v/mx);
+  let s=`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Grid electricity per day, cheap hours and peak">`+grid(L,W,[0,mx/2,mx].map(v=>[v,Y(v)]),v=>+v.toFixed(1));
+  rows.forEach((r,i)=>{const x=L+i*bw+1.5,w=Math.max(2,bw-3);
+    s+=`<path d="${bar(x,Y(r.cheap+r.peak),w,Y(r.cheap)-Y(r.cheap+r.peak)-1)}" fill="var(--warn)"><title>${niceDay(r.key)}: ${r.peak.toFixed(1)} kWh at the peak rate (${gbp(r.peakCost)})</title></path>`;
+    s+=`<rect x="${x}" y="${Y(r.cheap)}" width="${w}" height="${Math.max(0,Y(0)-Y(r.cheap))}" fill="var(--elec)"><title>${niceDay(r.key)}: ${r.cheap.toFixed(1)} kWh in the cheap hours</title></rect>`;
+    if(i%7===0)s+=`<text x="${x}" y="${H-6}">${niceDay(r.key).replace(/^\w+ /,'')}</text>`});
+  for(const c of tariffInfo(model).changes){const k=dayKey(new Date(c.from)),i=rows.findIndex(r=>r.key>=k);if(i<0)continue;const xc=L+i*bw;s+=`<g pointer-events="none"><line x1="${xc}" x2="${xc}" y1="${T}" y2="${H-B}" stroke="var(--ink)" stroke-dasharray="3 3"/><text x="${xc+4}" y="${T+10}" style="fill:var(--ink);font-weight:600">${esc(c.name)}</text></g>`}
+  return s+'</svg>'}
+function renderPeak(m,done){
+  if(!m.raw.elec)return'';const rows=peakStats(m,done.slice(-30)),l7=rows.slice(-7),p7=rows.slice(-14,-7);
+  const av=(a,f)=>a.length?a.reduce((s,x)=>s+f(x),0)/a.length:0,pk=av(l7,r=>r.peak),pkc=av(l7,r=>r.peakCost),prev=av(p7,r=>r.peak),ch=prev?(pk/prev-1)*100:0;
+  const sh=av(l7,r=>r.peak)/Math.max(0.01,av(l7,r=>r.peak+r.cheap));
+  const sp=rows.slice(-14),W=240,Hh=30,mx=Math.max(0.5,...sp.map(r=>r.peak+r.cheap)),bw=W/sp.length;
+  const mini=`<svg viewBox="0 0 ${W} ${Hh}" aria-hidden="true" style="width:100%;max-height:34px">`+sp.map((r,i)=>{const hc=r.cheap/mx*Hh,hp=r.peak/mx*Hh;return `<rect x="${(i*bw+1).toFixed(1)}" y="${(Hh-hc).toFixed(1)}" width="${(bw-2).toFixed(1)}" height="${hc.toFixed(1)}" fill="var(--elec)"/><rect x="${(i*bw+1).toFixed(1)}" y="${(Hh-hc-hp).toFixed(1)}" width="${(bw-2).toFixed(1)}" height="${Math.max(0,hp-0.5).toFixed(1)}" rx="1.5" fill="var(--warn)"/>`}).join('')+'</svg>';
+  tile('t-peak','Daytime (peak-rate) electricity',`${pk.toFixed(1)} kWh a day`,`${gbp(pkc)} a day · ${Math.round(sh*100)}% of grid use · <span class="${ch>0?'bad':'good'}">${ch>0?'▲':'▼'} ${Math.abs(ch).toFixed(0)}%</span> on the week before. Aim: near 0 when the battery covers the day`,mini);
+  return `<h3 style="margin-top:0">Grid electricity per day: cheap hours and peak</h3>
+  <div class="legend"><span><i class="dot" style="background:var(--elec)"></i>Cheap hours</span><span><i class="dot" style="background:var(--warn)"></i>Peak rate (rest of the day)</span></div>${peakChart(rows,240)}
+  <p>Last 7 days: <b>${pk.toFixed(1)} kWh a day at the peak rate</b> (${gbp(pkc)} a day), ${Math.round(sh*100)}% of what she took from the grid.</p>
+  <p class="sub">The Octopus meter only sees electricity coming from the grid, not the battery or solar. So this is how the battery shows up here: once it charges in the cheap hours and covers the house through the day, the orange (peak) part should shrink towards zero, and anything left is what the battery didn't cover. The battery's own charge level and output come from its maker's app.</p>`;
+}
 function renderMix(m,days){
   if(!days.length)return;
   const keys=new Set(days.map(d=>d.key));
@@ -648,7 +681,7 @@ function renderMix(m,days){
   const he=Array.from({length:24},(_,h)=>sum(days,d=>(d.hhE[2*h]||0)+(d.hhE[2*h+1]||0))/nd);
   const day=sum(days,d=>{let v=0;for(let j=18;j<32;j++)v+=d.hhG[j]||0;return v});
   const band=(d,a,b,key)=>{let v=0;for(let j=a*2;j<b*2;j++)v+=d[key][j]||0;return v};
-  $('bands').innerHTML=`<p class="sub" style="margin-top:0">${gT?Math.round(day/gT*100):0}% of the gas is burned between 9am and 4pm (shaded). If the house is empty then, that's the biggest saving.</p>
+  $('bands').innerHTML=renderPeak(m,m.days.filter(d=>d.complete))+`<h3>Average day, last 30 days</h3><p class="sub" style="margin-top:0">${gT?Math.round(day/gT*100):0}% of the gas is burned between 9am and 4pm (shaded). If the house is empty then, that's the biggest saving.</p>
     <h3 style="margin-top:4px">Gas, kWh per hour</h3>${hourChart(hg,'var(--gas)','kWh gas',[9,16])}
     <h3>Electricity from the grid, kWh per hour</h3>${hourChart(he,'var(--elec)','kWh electricity')}
     <table><tr><th>Time</th><th class="n">Gas kWh</th><th class="n">%</th><th class="n">Elec kWh</th><th class="n">%</th></tr>`+
