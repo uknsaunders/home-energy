@@ -687,8 +687,8 @@ function offPeakDays(m){if(!m.raw.elec)return'';const done=m.days.filter(d=>d.co
   const wc=sum(wk,r=>r.cheap),wp=sum(wk,r=>r.peak),days=wk.filter(ok).length;
   return `<h3>Off-peak and peak, day by day</h3>
   <div class="legend"><span><i class="dot" style="background:var(--elec)"></i>Off-peak (cheap hours)</span><span><i class="dot" style="background:var(--warn)"></i>Peak</span></div>
-  <div style="display:flex;gap:14px;align-items:center;margin:6px 0 10px">${donut(wc,wp,120,'last 7 days')}
-    <div><div style="font-size:20px;font-weight:700">${days} of ${wk.length} days</div><div class="sub" style="margin:0">fully off-peak (under 0.5 kWh at peak)</div>
+  <div style="display:flex;gap:14px;align-items:center;margin:6px 0 10px">${donut(wc,wp,120)}
+    <div><div class="sub" style="margin:0">Last 7 days: ${wc+wp?Math.round(wc/(wc+wp)*100):0}% off-peak</div><div style="font-size:20px;font-weight:700">${days} of ${wk.length} days</div><div class="sub" style="margin:0">fully off-peak (under 0.5 kWh at peak)</div>
     <div class="sub" style="margin:6px 0 0">Peak this week: <b>${wp.toFixed(1)} kWh</b> (${gbp(sum(wk,r=>r.peakCost))}). ${B?`Battery: ${B} kWh.`:''}</div></div></div>
   <div class="donuts">${rows.map(r=>`<div class="dday ${ok(r)?'okd':''}">${donut(r.cheap,r.peak,64)}<div class="dl">${niceDay(r.key)}</div><div class="dv">${r.cheap+r.peak<0.3?'✓ no grid use':ok(r)?'✓ all off-peak':`${r.peak.toFixed(1)} kWh peak`}</div></div>`).join('')}</div>
   <p class="sub">The meter only sees the grid, so peak kWh is what the ${B?B+' kWh ':''}battery didn't cover. If most days show a few kWh at peak, the battery is running out before the cheap hours (check it's charging to 100% from 00:30 and that the car isn't drawing from it). If peak is above ${B||6} kWh on some days, the house used more in the day than the battery can hold.</p>`}
