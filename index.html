@@ -82,6 +82,11 @@ html,body{height:100%;overflow:hidden;overscroll-behavior:none}
 .tile svg{margin-top:4px;max-height:34px}
 .tile.sel{border-color:var(--accent)}
 .tile.wide{grid-column:span 2}
+.donuts{display:grid;grid-template-columns:repeat(auto-fill,minmax(82px,1fr));gap:8px}
+.dday{background:var(--bg);border-radius:12px;padding:6px 4px;text-align:center;border:1.5px solid transparent}
+.dday.okd{border-color:var(--accent)}
+.dday svg{display:inline-block;width:64px;height:64px}
+.dl{font-size:12px;font-weight:600}.dv{font-size:11px;color:var(--muted)}.okd .dv{color:var(--accent)}
 .good{color:var(--accent)!important}.bad{color:var(--warn)!important}
 .mini{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
 .mini button{background:var(--card);color:var(--ink);border-radius:12px;padding:8px 4px;font-size:12.5px;font-weight:600;display:flex;flex-direction:column;align-items:center;gap:2px;box-shadow:0 1px 2px rgba(0,0,0,.06)}
@@ -215,11 +220,11 @@ details .sub{margin:0 0 10px}
 <script>
 (function(){
 'use strict';
-const VERSION='2026-11-25a';
+const VERSION='2026-11-25b';
 const API='https://api.octopus.energy/v1';
 (function selfUpdate(){try{fetch(location.pathname+'?v='+Date.now(),{cache:'no-store'}).then(r=>r.text()).then(t=>{const m=t.match(/const VERSION='([^']+)'/);
   if(m&&m[1]!==VERSION&&sessionStorage.getItem('he_reloaded')!==m[1]){sessionStorage.setItem('he_reloaded',m[1]);location.reload()}}).catch(()=>{})}catch(e){}})();
-const DEF={key:'',acct:'',dd:105,gasFactor:11.36,bal:0,baseGas:2.7,temp:21,batt:9,loc:'53.65,-1.78',hoursOut:18,rads:13,radsDay:4,dysonKw:2,heaterKw:2,tempPrev:21,tempDate:''};
+const DEF={key:'',acct:'',dd:105,gasFactor:11.36,bal:0,baseGas:2.7,temp:21,batt:6,loc:'53.65,-1.78',hoursOut:18,rads:13,radsDay:4,dysonKw:2,heaterKw:2,tempPrev:21,tempDate:''};
 const TZ='Europe/London';
 const $=id=>document.getElementById(id);
 const store={get(k){try{return JSON.parse(localStorage.getItem(k))}catch(e){return null}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}},del(k){try{localStorage.removeItem(k)}catch(e){}}};
@@ -231,6 +236,7 @@ const idb={open(){return new Promise((ok,no)=>{try{const r=indexedDB.open('home-
   async get(k){try{const d=await idb.open();return await new Promise(ok=>{const r=d.transaction('kv').objectStore('kv').get(k);r.onsuccess=()=>ok(r.result);r.onerror=()=>ok(null)})}catch(e){return null}}};
 function saveCfg(){store.set('he_cfg',cfg);idb.set('he_cfg',cfg)}
 try{navigator.storage&&navigator.storage.persist&&navigator.storage.persist()}catch(e){}
+if(storedCfg&&!storedCfg.battSet){if(Number(cfg.batt)===9)cfg.batt=6;cfg.battSet=1;saveCfg()}
 if(storedCfg&&storedCfg.tempDate===undefined){ // she turned the heating down to 17°C on 19 Nov 2026
   const t=Number(storedCfg.temp)||21;cfg.tempPrev=t<21?21:t;cfg.temp=t<21?t:17;cfg.tempDate='2026-11-19';saveCfg()}
 let model=null, selDay=null;
@@ -671,6 +677,21 @@ function renderPeak(m,done){
   <p>Last 7 days: <b>${pk.toFixed(1)} kWh a day at the peak rate</b> (${gbp(pkc)} a day), ${Math.round(sh*100)}% of what she took from the grid.</p>
   <p class="sub">The Octopus meter only sees electricity coming from the grid, not the battery or solar. So this is how the battery shows up here: once it charges in the cheap hours and covers the house through the day, the orange (peak) part should shrink towards zero, and anything left is what the battery didn't cover. The battery's own charge level and output come from its maker's app.</p>`;
 }
+function donut(cheap,peak,size,label){if(cheap+peak<0.3)return `<svg viewBox="0 0 ${size} ${size}" width="${size}" height="${size}" style="width:${size}px;height:${size}px;flex:none" role="img" aria-label="no grid use"><circle cx="${size/2}" cy="${size/2}" r="${size/2-size*0.11}" fill="none" stroke="var(--accent)" stroke-width="${size*0.18}" opacity=".35"/><text x="${size/2}" y="${size/2+size*0.07}" text-anchor="middle" style="font-size:${(size*0.2).toFixed(0)}px;font-weight:700;fill:var(--ink)">0</text></svg>`;const t=cheap+peak,r=size/2-size*0.11,c=2*Math.PI*r,f=t?cheap/t:0,sw=size*0.18;
+  return `<svg viewBox="0 0 ${size} ${size}" width="${size}" height="${size}" style="width:${size}px;height:${size}px;flex:none" role="img" aria-label="${Math.round(f*100)}% off-peak"><circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="var(--warn)" stroke-width="${sw}" opacity="${t?1:.15}"/>
+  <circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="var(--elec)" stroke-width="${sw}" stroke-dasharray="${(f*c).toFixed(2)} ${c.toFixed(2)}" transform="rotate(-90 ${size/2} ${size/2})" ${f>0&&f<1?'stroke-linecap="butt"':''}/>
+  <text x="${size/2}" y="${size/2+size*0.07}" text-anchor="middle" style="font-size:${(size*0.22).toFixed(0)}px;font-weight:700;fill:var(--ink)">${t?Math.round(f*100)+'%':'\u2013'}</text>${label?`<text x="${size/2}" y="${size/2+size*0.24}" text-anchor="middle" style="font-size:${(size*0.1).toFixed(0)}px;fill:var(--muted)">${label}</text>`:''}</svg>`}
+// Day by day: share of grid electricity in the cheap hours, with the battery check
+function offPeakDays(m){if(!m.raw.elec)return'';const done=m.days.filter(d=>d.complete),rows=peakStats(m,done.slice(-14)).reverse(),wk=rows.slice(0,7);
+  const B=Number(cfg.batt)||0,ok=r=>r.peak<0.5,sum=(a,f)=>a.reduce((s,x)=>s+f(x),0);
+  const wc=sum(wk,r=>r.cheap),wp=sum(wk,r=>r.peak),days=wk.filter(ok).length;
+  return `<h3>Off-peak and peak, day by day</h3>
+  <div class="legend"><span><i class="dot" style="background:var(--elec)"></i>Off-peak (cheap hours)</span><span><i class="dot" style="background:var(--warn)"></i>Peak</span></div>
+  <div style="display:flex;gap:14px;align-items:center;margin:6px 0 10px">${donut(wc,wp,120,'last 7 days')}
+    <div><div style="font-size:20px;font-weight:700">${days} of ${wk.length} days</div><div class="sub" style="margin:0">fully off-peak (under 0.5 kWh at peak)</div>
+    <div class="sub" style="margin:6px 0 0">Peak this week: <b>${wp.toFixed(1)} kWh</b> (${gbp(sum(wk,r=>r.peakCost))}). ${B?`Battery: ${B} kWh.`:''}</div></div></div>
+  <div class="donuts">${rows.map(r=>`<div class="dday ${ok(r)?'okd':''}">${donut(r.cheap,r.peak,64)}<div class="dl">${niceDay(r.key)}</div><div class="dv">${r.cheap+r.peak<0.3?'✓ no grid use':ok(r)?'✓ all off-peak':`${r.peak.toFixed(1)} kWh peak`}</div></div>`).join('')}</div>
+  <p class="sub">The meter only sees the grid, so peak kWh is what the ${B?B+' kWh ':''}battery didn't cover. If most days show a few kWh at peak, the battery is running out before the cheap hours (check it's charging to 100% from 00:30 and that the car isn't drawing from it). If peak is above ${B||6} kWh on some days, the house used more in the day than the battery can hold.</p>`}
 function renderMix(m,days){
   if(!days.length)return;
   const keys=new Set(days.map(d=>d.key));
@@ -684,6 +705,7 @@ function renderMix(m,days){
   $('bands').innerHTML=renderPeak(m,m.days.filter(d=>d.complete))+`<h3>Average day, last 30 days</h3><p class="sub" style="margin-top:0">${gT?Math.round(day/gT*100):0}% of the gas is burned between 9am and 4pm (shaded). If the house is empty then, that's the biggest saving.</p>
     <h3 style="margin-top:4px">Gas, kWh per hour</h3>${hourChart(hg,'var(--gas)','kWh gas',[9,16])}
     <h3>Electricity from the grid, kWh per hour</h3>${hourChart(he,'var(--elec)','kWh electricity')}
+    ${offPeakDays(m)}
     <table><tr><th>Time</th><th class="n">Gas kWh</th><th class="n">%</th><th class="n">Elec kWh</th><th class="n">%</th></tr>`+
     B.map(([l,a,b])=>{const g=sum(days,d=>band(d,a,b,'hhG')),e=sum(days,d=>band(d,a,b,'hhE'));return `<tr><td>${l}</td><td class="n">${g.toFixed(0)}</td><td class="n">${gT?Math.round(g/gT*100):0}%</td><td class="n">${e.toFixed(0)}</td><td class="n">${eT?Math.round(e/eT*100):0}%</td></tr>`}).join('')+'</table>';
   // what it's used for: segmented bar + table
