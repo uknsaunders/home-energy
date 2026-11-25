@@ -219,7 +219,7 @@ details .sub{margin:0 0 10px}
 <script>
 (function(){
 'use strict';
-const VERSION='2026-11-25c';
+const VERSION='2026-11-25d';
 const API='https://api.octopus.energy/v1';
 (function selfUpdate(){try{fetch(location.pathname+'?v='+Date.now(),{cache:'no-store'}).then(r=>r.text()).then(t=>{const m=t.match(/const VERSION='([^']+)'/);
   if(m&&m[1]!==VERSION&&sessionStorage.getItem('he_reloaded')!==m[1]){sessionStorage.setItem('he_reloaded',m[1]);location.reload()}}).catch(()=>{})}catch(e){}})();
@@ -684,20 +684,20 @@ function donut(cheap,peak,size,label){if(cheap+peak<0.3)return `<svg viewBox="0 
   <circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="var(--elec)" stroke-width="${sw}" stroke-dasharray="${(f*c).toFixed(2)} ${c.toFixed(2)}" transform="rotate(-90 ${size/2} ${size/2})" ${f>0&&f<1?'stroke-linecap="butt"':''}/>
   <text x="${size/2}" y="${size/2+size*0.07}" text-anchor="middle" style="font-size:${(size*0.22).toFixed(0)}px;font-weight:700;fill:var(--ink)">${t?Math.round(f*100)+'%':'\u2013'}</text>${label?`<text x="${size/2}" y="${size/2+size*0.24}" text-anchor="middle" style="font-size:${(size*0.1).toFixed(0)}px;fill:var(--muted)">${label}</text>`:''}</svg>`}
 function dayDonut(m,d){if(!m.raw.elec)return'';const r=peakStats(m,[d])[0],B=Number(cfg.batt)||0,t=r.cheap+r.peak;
-  const v=t<0.3?'<b class="good">✓ No grid use</b>: solar and the battery covered the whole day.':r.peak<0.5?'<b class="good">✓ All off-peak</b>: the battery covered the peak hours.':B&&r.peak<=B?`<b class="bad">${r.peak.toFixed(1)} kWh at peak</b> (${gbp(r.peakCost)}): the ${B} kWh battery ran out or wasn't full. Check it charged to 100% overnight and the car didn't drain it.`:`<b class="bad">${r.peak.toFixed(1)} kWh at peak</b> (${gbp(r.peakCost)}): more than the ${B||6} kWh battery can hold, so some peak use is unavoidable unless the day's use comes down.`;
-  return `<h3>Off-peak and peak${d.complete?'':' (so far)'}</h3><div class="legend"><span><i class="dot" style="background:var(--elec)"></i>Off-peak ${r.cheap.toFixed(1)} kWh</span><span><i class="dot" style="background:var(--warn)"></i>Peak ${r.peak.toFixed(1)} kWh</span></div>
+  const v=t<0.3?'<b class="good">✓ No electricity from the grid</b>: solar and the battery covered the whole day.':r.peak<0.5?'<b class="good">✓ All electricity off-peak</b>: the battery covered the peak hours.':B&&r.peak<=B?`<b class="bad">${r.peak.toFixed(1)} kWh of electricity at peak</b> (${gbp(r.peakCost)}): the ${B} kWh battery ran out or wasn't full. Check it charged to 100% overnight and the car didn't drain it.`:`<b class="bad">${r.peak.toFixed(1)} kWh of electricity at peak</b> (${gbp(r.peakCost)}): more than the ${B||6} kWh battery can hold, so some peak use is unavoidable unless the day's use comes down.`;
+  return `<h3>Electricity from the grid: off-peak vs peak${d.complete?'':' (so far)'}</h3><div class="legend"><span><i class="dot" style="background:var(--elec)"></i>Off-peak electricity ${r.cheap.toFixed(1)} kWh</span><span><i class="dot" style="background:var(--warn)"></i>Peak electricity ${r.peak.toFixed(1)} kWh</span></div>
   <div style="display:flex;gap:14px;align-items:center;margin:6px 0">${donut(r.cheap,r.peak,110)}<div class="sub" style="margin:0">${v}</div></div>`}
 // Day by day: share of grid electricity in the cheap hours, with the battery check
 function offPeakDays(m){if(!m.raw.elec)return'';const done=m.days.filter(d=>d.complete),rows=peakStats(m,done.slice(-14)).reverse(),wk=rows.slice(0,7);
   const B=Number(cfg.batt)||0,ok=r=>r.peak<0.5,sum=(a,f)=>a.reduce((s,x)=>s+f(x),0);
   const wc=sum(wk,r=>r.cheap),wp=sum(wk,r=>r.peak),days=wk.filter(ok).length;
-  return `<h3>Off-peak and peak, day by day</h3>
-  <div class="legend"><span><i class="dot" style="background:var(--elec)"></i>Off-peak (cheap hours)</span><span><i class="dot" style="background:var(--warn)"></i>Peak</span></div>
+  return `<h3>Electricity: off-peak vs peak, day by day</h3><p class="sub" style="margin-top:0">Electricity only (gas has one price all day). Share of the electricity taken from the grid in the cheap hours.</p>
+  <div class="legend"><span><i class="dot" style="background:var(--elec)"></i>Off-peak electricity (cheap hours)</span><span><i class="dot" style="background:var(--warn)"></i>Peak electricity</span></div>
   <div style="display:flex;gap:14px;align-items:center;margin:6px 0 10px">${donut(wc,wp,120)}
-    <div><div class="sub" style="margin:0">Last 7 days: ${wc+wp?Math.round(wc/(wc+wp)*100):0}% off-peak</div><div style="font-size:20px;font-weight:700">${days} of ${wk.length} days</div><div class="sub" style="margin:0">fully off-peak (under 0.5 kWh at peak)</div>
-    <div class="sub" style="margin:6px 0 0">Peak this week: <b>${wp.toFixed(1)} kWh</b> (${gbp(sum(wk,r=>r.peakCost))}). ${B?`Battery: ${B} kWh.`:''}</div></div></div>
+    <div><div class="sub" style="margin:0">Last 7 days: ${wc+wp?Math.round(wc/(wc+wp)*100):0}% of electricity off-peak</div><div style="font-size:20px;font-weight:700">${days} of ${wk.length} days</div><div class="sub" style="margin:0">electricity fully off-peak (under 0.5 kWh at peak)</div>
+    <div class="sub" style="margin:6px 0 0">Peak electricity this week: <b>${wp.toFixed(1)} kWh</b> (${gbp(sum(wk,r=>r.peakCost))}). ${B?`Battery: ${B} kWh.`:''}</div></div></div>
   <div class="donuts">${rows.map(r=>`<div class="dday ${ok(r)?'okd':''}" data-day="${r.key}" role="button" style="cursor:pointer">${donut(r.cheap,r.peak,64)}<div class="dl">${niceDay(r.key)}</div><div class="dv">${r.cheap+r.peak<0.3?'✓ no grid use':ok(r)?'✓ all off-peak':`${r.peak.toFixed(1)} kWh peak`}</div></div>`).join('')}</div>
-  <p class="sub">The meter only sees the grid, so peak kWh is what the ${B?B+' kWh ':''}battery didn't cover. If most days show a few kWh at peak, the battery is running out before the cheap hours (check it's charging to 100% from 00:30 and that the car isn't drawing from it). If peak is above ${B||6} kWh on some days, the house used more in the day than the battery can hold.</p>`}
+  <p class="sub">The electricity meter only sees the grid, so peak kWh is what the ${B?B+' kWh ':''}battery didn't cover. If most days show a few kWh at peak, the battery is running out before the cheap hours (check it's charging to 100% from 00:30 and that the car isn't drawing from it). If peak is above ${B||6} kWh on some days, the house used more in the day than the battery can hold.</p>`}
 function renderMix(m,days){
   if(!days.length)return;
   const keys=new Set(days.map(d=>d.key));
