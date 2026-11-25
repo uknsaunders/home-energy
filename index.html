@@ -137,7 +137,6 @@ details .sub{margin:0 0 10px}
       <button class="tile" data-go="confirmed" id="t-saved"></button>
       <button class="tile" data-go="save" id="t-save"></button>
       <button class="tile" data-go="weather" id="t-weather"></button>
-      <button class="tile wide" data-go="bands" id="t-peak"></button>
     </div>
     <nav class="mini">
       <button data-go="bands"><span class="ni">◷</span>Time of day</button>
@@ -153,11 +152,11 @@ details .sub{margin:0 0 10px}
 <section class="screen" id="s-save"><header class="bar"><button class="back">‹ Back</button><h2>Ways to save</h2></header><div class="body"><div id="saveCard"></div></div></section>
 <section class="screen" id="s-daily"><header class="bar"><button class="back">‹ Back</button><h2>Cost per day, last 30 days</h2></header><div class="body">
   <div class="legend"><span><i class="dot" style="background:var(--gas)"></i>Gas</span><span><i class="dot" style="background:var(--elec)"></i>Electricity</span></div>
-  <div id="dailyChart"></div><p class="sub">Tap a day to see it half hour by half hour.</p></div></section>
+  <div id="dailyChart"></div><p class="sub">Tap a day to see it half hour by half hour.</p><div id="dailyDonuts"></div></div></section>
 <section class="screen" id="s-day"><header class="bar"><button class="back">‹ Back</button><h2>Day detail</h2></header><div class="body">
   <div class="daynav"><button class="ghost" id="prevDay" aria-label="Previous day">‹ Prev</button><b id="dayTitle"></b><button class="ghost" id="nextDay" aria-label="Next day">Next ›</button></div>
   <div class="legend"><span><i class="dot" style="background:var(--gas)"></i>Gas kWh</span><span><i class="dot" style="background:var(--elec)"></i>Electricity kWh</span><span>per half hour</span></div>
-  <div id="dayChart"></div><div id="daySummary" class="sub" style="margin-top:6px"></div></div></section>
+  <div id="dayChart"></div><div id="daySummary" class="sub" style="margin-top:6px"></div><div id="dayDonut"></div></div></section>
 <section class="screen" id="s-bands"><header class="bar"><button class="back">‹ Back</button><h2>Time of day, last 30 days</h2></header><div class="body"><div id="bands"></div></div></section>
 <section class="screen" id="s-uses"><header class="bar"><button class="back">‹ Back</button><h2>What it's used for</h2></header><div class="body"><div id="uses"></div></div></section>
 <section class="screen" id="s-confirmed"><header class="bar"><button class="back">‹ Back</button><h2>Savings so far</h2></header><div class="body"><div id="confirmed"></div></div></section>
@@ -220,7 +219,7 @@ details .sub{margin:0 0 10px}
 <script>
 (function(){
 'use strict';
-const VERSION='2026-11-25b';
+const VERSION='2026-11-25c';
 const API='https://api.octopus.energy/v1';
 (function selfUpdate(){try{fetch(location.pathname+'?v='+Date.now(),{cache:'no-store'}).then(r=>r.text()).then(t=>{const m=t.match(/const VERSION='([^']+)'/);
   if(m&&m[1]!==VERSION&&sessionStorage.getItem('he_reloaded')!==m[1]){sessionStorage.setItem('he_reloaded',m[1]);location.reload()}}).catch(()=>{})}catch(e){}})();
@@ -534,6 +533,8 @@ function renderDaily(m){
     const xc=L+i*bw;s+=`<g pointer-events="none"><rect x="${xc}" y="${T}" width="${W-xc}" height="${H-T-B}" fill="var(--elec)" opacity=".07"/><line x1="${xc}" x2="${xc}" y1="${T-6}" y2="${H-B}" stroke="var(--ink)" stroke-width="1.5" stroke-dasharray="3 3"/><text x="${Math.min(xc+4,W-110)}" y="${T+4}" fill="var(--ink)" font-weight="600">${esc(c.name)} →</text></g>`}
   s+='</svg>';$('dailyChart').innerHTML=s;
   $('dailyChart').querySelectorAll('.bar').forEach(g=>g.addEventListener('click',()=>{selDay=g.dataset.day;renderDaily(model);renderDay();go('day')}));
+  $('dailyDonuts').innerHTML=offPeakDays(m);
+  $('dailyDonuts').querySelectorAll('.dday[data-day]').forEach(g=>g.addEventListener('click',()=>{selDay=g.dataset.day;renderDaily(model);renderDay();go('day')}));
 }
 
 function renderDay(){
@@ -554,6 +555,7 @@ function renderDay(){
   if(!cheapN)s+=`<rect x="${L}" y="${T}" width="${bw*12}" height="${H-T-B}" fill="var(--ink)" opacity=".05"/>`;
   s+='</svg>';
   $('dayChart').innerHTML=s;
+  $('dayDonut').innerHTML=dayDonut(m,d);
   $('daySummary').innerHTML=`Gas ${d.g.toFixed(1)} kWh (${gbp(d.gc)}), of which ${d.night.toFixed(1)} kWh overnight${cheapN?'':' (shaded)'} · Electricity ${d.e.toFixed(1)} kWh from the grid (${gbp(d.ec)})${cheapN?`, ${d.e?Math.round(cheapK/d.e*100):0}% in the cheap-rate hours (shaded blue)`:''} · Total ${gbp(d.cost)}`;
 }
 
@@ -671,7 +673,7 @@ function renderPeak(m,done){
   const sh=av(l7,r=>r.peak)/Math.max(0.01,av(l7,r=>r.peak+r.cheap));
   const sp=rows.slice(-14),W=240,Hh=30,mx=Math.max(0.5,...sp.map(r=>r.peak+r.cheap)),bw=W/sp.length;
   const mini=`<svg viewBox="0 0 ${W} ${Hh}" aria-hidden="true" style="width:100%;max-height:34px">`+sp.map((r,i)=>{const hc=r.cheap/mx*Hh,hp=r.peak/mx*Hh;return `<rect x="${(i*bw+1).toFixed(1)}" y="${(Hh-hc).toFixed(1)}" width="${(bw-2).toFixed(1)}" height="${hc.toFixed(1)}" fill="var(--elec)"/><rect x="${(i*bw+1).toFixed(1)}" y="${(Hh-hc-hp).toFixed(1)}" width="${(bw-2).toFixed(1)}" height="${Math.max(0,hp-0.5).toFixed(1)}" rx="1.5" fill="var(--warn)"/>`}).join('')+'</svg>';
-  tile('t-peak','Daytime (peak-rate) electricity',`${pk.toFixed(1)} kWh a day`,`${gbp(pkc)} a day · ${Math.round(sh*100)}% of grid use · <span class="${ch>0?'bad':'good'}">${ch>0?'▲':'▼'} ${Math.abs(ch).toFixed(0)}%</span> on the week before. Aim: near 0 when the battery covers the day`,mini);
+  if(0)tile('t-peak','Daytime (peak-rate) electricity',`${pk.toFixed(1)} kWh a day`,`${gbp(pkc)} a day · ${Math.round(sh*100)}% of grid use · <span class="${ch>0?'bad':'good'}">${ch>0?'▲':'▼'} ${Math.abs(ch).toFixed(0)}%</span> on the week before. Aim: near 0 when the battery covers the day`,mini);
   return `<h3 style="margin-top:0">Grid electricity per day: cheap hours and peak</h3>
   <div class="legend"><span><i class="dot" style="background:var(--elec)"></i>Cheap hours</span><span><i class="dot" style="background:var(--warn)"></i>Peak rate (rest of the day)</span></div>${peakChart(rows,240)}
   <p>Last 7 days: <b>${pk.toFixed(1)} kWh a day at the peak rate</b> (${gbp(pkc)} a day), ${Math.round(sh*100)}% of what she took from the grid.</p>
@@ -681,6 +683,10 @@ function donut(cheap,peak,size,label){if(cheap+peak<0.3)return `<svg viewBox="0 
   return `<svg viewBox="0 0 ${size} ${size}" width="${size}" height="${size}" style="width:${size}px;height:${size}px;flex:none" role="img" aria-label="${Math.round(f*100)}% off-peak"><circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="var(--warn)" stroke-width="${sw}" opacity="${t?1:.15}"/>
   <circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="var(--elec)" stroke-width="${sw}" stroke-dasharray="${(f*c).toFixed(2)} ${c.toFixed(2)}" transform="rotate(-90 ${size/2} ${size/2})" ${f>0&&f<1?'stroke-linecap="butt"':''}/>
   <text x="${size/2}" y="${size/2+size*0.07}" text-anchor="middle" style="font-size:${(size*0.22).toFixed(0)}px;font-weight:700;fill:var(--ink)">${t?Math.round(f*100)+'%':'\u2013'}</text>${label?`<text x="${size/2}" y="${size/2+size*0.24}" text-anchor="middle" style="font-size:${(size*0.1).toFixed(0)}px;fill:var(--muted)">${label}</text>`:''}</svg>`}
+function dayDonut(m,d){if(!m.raw.elec)return'';const r=peakStats(m,[d])[0],B=Number(cfg.batt)||0,t=r.cheap+r.peak;
+  const v=t<0.3?'<b class="good">✓ No grid use</b>: solar and the battery covered the whole day.':r.peak<0.5?'<b class="good">✓ All off-peak</b>: the battery covered the peak hours.':B&&r.peak<=B?`<b class="bad">${r.peak.toFixed(1)} kWh at peak</b> (${gbp(r.peakCost)}): the ${B} kWh battery ran out or wasn't full. Check it charged to 100% overnight and the car didn't drain it.`:`<b class="bad">${r.peak.toFixed(1)} kWh at peak</b> (${gbp(r.peakCost)}): more than the ${B||6} kWh battery can hold, so some peak use is unavoidable unless the day's use comes down.`;
+  return `<h3>Off-peak and peak${d.complete?'':' (so far)'}</h3><div class="legend"><span><i class="dot" style="background:var(--elec)"></i>Off-peak ${r.cheap.toFixed(1)} kWh</span><span><i class="dot" style="background:var(--warn)"></i>Peak ${r.peak.toFixed(1)} kWh</span></div>
+  <div style="display:flex;gap:14px;align-items:center;margin:6px 0">${donut(r.cheap,r.peak,110)}<div class="sub" style="margin:0">${v}</div></div>`}
 // Day by day: share of grid electricity in the cheap hours, with the battery check
 function offPeakDays(m){if(!m.raw.elec)return'';const done=m.days.filter(d=>d.complete),rows=peakStats(m,done.slice(-14)).reverse(),wk=rows.slice(0,7);
   const B=Number(cfg.batt)||0,ok=r=>r.peak<0.5,sum=(a,f)=>a.reduce((s,x)=>s+f(x),0);
@@ -690,7 +696,7 @@ function offPeakDays(m){if(!m.raw.elec)return'';const done=m.days.filter(d=>d.co
   <div style="display:flex;gap:14px;align-items:center;margin:6px 0 10px">${donut(wc,wp,120)}
     <div><div class="sub" style="margin:0">Last 7 days: ${wc+wp?Math.round(wc/(wc+wp)*100):0}% off-peak</div><div style="font-size:20px;font-weight:700">${days} of ${wk.length} days</div><div class="sub" style="margin:0">fully off-peak (under 0.5 kWh at peak)</div>
     <div class="sub" style="margin:6px 0 0">Peak this week: <b>${wp.toFixed(1)} kWh</b> (${gbp(sum(wk,r=>r.peakCost))}). ${B?`Battery: ${B} kWh.`:''}</div></div></div>
-  <div class="donuts">${rows.map(r=>`<div class="dday ${ok(r)?'okd':''}">${donut(r.cheap,r.peak,64)}<div class="dl">${niceDay(r.key)}</div><div class="dv">${r.cheap+r.peak<0.3?'✓ no grid use':ok(r)?'✓ all off-peak':`${r.peak.toFixed(1)} kWh peak`}</div></div>`).join('')}</div>
+  <div class="donuts">${rows.map(r=>`<div class="dday ${ok(r)?'okd':''}" data-day="${r.key}" role="button" style="cursor:pointer">${donut(r.cheap,r.peak,64)}<div class="dl">${niceDay(r.key)}</div><div class="dv">${r.cheap+r.peak<0.3?'✓ no grid use':ok(r)?'✓ all off-peak':`${r.peak.toFixed(1)} kWh peak`}</div></div>`).join('')}</div>
   <p class="sub">The meter only sees the grid, so peak kWh is what the ${B?B+' kWh ':''}battery didn't cover. If most days show a few kWh at peak, the battery is running out before the cheap hours (check it's charging to 100% from 00:30 and that the car isn't drawing from it). If peak is above ${B||6} kWh on some days, the house used more in the day than the battery can hold.</p>`}
 function renderMix(m,days){
   if(!days.length)return;
@@ -705,7 +711,6 @@ function renderMix(m,days){
   $('bands').innerHTML=renderPeak(m,m.days.filter(d=>d.complete))+`<h3>Average day, last 30 days</h3><p class="sub" style="margin-top:0">${gT?Math.round(day/gT*100):0}% of the gas is burned between 9am and 4pm (shaded). If the house is empty then, that's the biggest saving.</p>
     <h3 style="margin-top:4px">Gas, kWh per hour</h3>${hourChart(hg,'var(--gas)','kWh gas',[9,16])}
     <h3>Electricity from the grid, kWh per hour</h3>${hourChart(he,'var(--elec)','kWh electricity')}
-    ${offPeakDays(m)}
     <table><tr><th>Time</th><th class="n">Gas kWh</th><th class="n">%</th><th class="n">Elec kWh</th><th class="n">%</th></tr>`+
     B.map(([l,a,b])=>{const g=sum(days,d=>band(d,a,b,'hhG')),e=sum(days,d=>band(d,a,b,'hhE'));return `<tr><td>${l}</td><td class="n">${g.toFixed(0)}</td><td class="n">${gT?Math.round(g/gT*100):0}%</td><td class="n">${e.toFixed(0)}</td><td class="n">${eT?Math.round(e/eT*100):0}%</td></tr>`}).join('')+'</table>';
   // what it's used for: segmented bar + table
