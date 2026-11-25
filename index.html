@@ -11,8 +11,8 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230f6e5c'/%3E%3Cpath d='M36 8 18 36h12l-4 20 20-30H34z' fill='%23fff'/%3E%3C/svg%3E">
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' fill='%230f6e5c'/%3E%3Cpath d='M36 8 18 36h12l-4 20 20-30H34z' fill='%23fff'/%3E%3C/svg%3E">
 <style>
-:root{--bg:#f4f5f3;--card:#fff;--ink:#1d2321;--muted:#66706c;--line:#e3e6e3;--gas:#eb6834;--elec:#2a78d6;--gas2:#f6c2a7;--elec2:#b7d2f2;--accent:#0f6e5c;--warn:#b5481f;--warnbg:#fbece6;--okbg:#e6f3ee}
-@media (prefers-color-scheme:dark){:root{--bg:#121514;--card:#1c201f;--ink:#e9ece9;--muted:#9aa49f;--line:#2c3230;--gas:#d95926;--elec:#3987e5;--gas2:#7a4229;--elec2:#2c4a74;--accent:#4fc1a6;--warn:#f08f68;--warnbg:#3a231b;--okbg:#17302a}}
+:root{--bg:#f4f5f3;--card:#fff;--ink:#1d2321;--muted:#66706c;--line:#e3e6e3;--gas:#eb6834;--elec:#2a78d6;--gas2:#f6c2a7;--elec2:#b7d2f2;--accent:#0f6e5c;--warn:#b5481f;--warnbg:#fbece6;--okbg:#e6f3ee;--gp1:#6250d6;--gp2:#eda100;--gp3:#1baf7a;--gp4:#eb6834}
+@media (prefers-color-scheme:dark){:root{--bg:#121514;--card:#1c201f;--ink:#e9ece9;--muted:#9aa49f;--line:#2c3230;--gas:#d95926;--elec:#3987e5;--gas2:#7a4229;--elec2:#2c4a74;--accent:#4fc1a6;--warn:#f08f68;--warnbg:#3a231b;--okbg:#17302a;--gp1:#9085e9;--gp2:#c98500;--gp3:#199e70;--gp4:#d95926}}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
 main{max-width:640px;margin:0 auto;padding:14px 14px 40px}
@@ -219,7 +219,7 @@ details .sub{margin:0 0 10px}
 <script>
 (function(){
 'use strict';
-const VERSION='2026-11-25d';
+const VERSION='2026-11-25e';
 const API='https://api.octopus.energy/v1';
 (function selfUpdate(){try{fetch(location.pathname+'?v='+Date.now(),{cache:'no-store'}).then(r=>r.text()).then(t=>{const m=t.match(/const VERSION='([^']+)'/);
   if(m&&m[1]!==VERSION&&sessionStorage.getItem('he_reloaded')!==m[1]){sessionStorage.setItem('he_reloaded',m[1]);location.reload()}}).catch(()=>{})}catch(e){}})();
@@ -533,7 +533,7 @@ function renderDaily(m){
     const xc=L+i*bw;s+=`<g pointer-events="none"><rect x="${xc}" y="${T}" width="${W-xc}" height="${H-T-B}" fill="var(--elec)" opacity=".07"/><line x1="${xc}" x2="${xc}" y1="${T-6}" y2="${H-B}" stroke="var(--ink)" stroke-width="1.5" stroke-dasharray="3 3"/><text x="${Math.min(xc+4,W-110)}" y="${T+4}" fill="var(--ink)" font-weight="600">${esc(c.name)} →</text></g>`}
   s+='</svg>';$('dailyChart').innerHTML=s;
   $('dailyChart').querySelectorAll('.bar').forEach(g=>g.addEventListener('click',()=>{selDay=g.dataset.day;renderDaily(model);renderDay();go('day')}));
-  $('dailyDonuts').innerHTML=offPeakDays(m);
+  $('dailyDonuts').innerHTML=offPeakDays(m)+gasDays(m);
   $('dailyDonuts').querySelectorAll('.dday[data-day]').forEach(g=>g.addEventListener('click',()=>{selDay=g.dataset.day;renderDaily(model);renderDay();go('day')}));
 }
 
@@ -555,7 +555,7 @@ function renderDay(){
   if(!cheapN)s+=`<rect x="${L}" y="${T}" width="${bw*12}" height="${H-T-B}" fill="var(--ink)" opacity=".05"/>`;
   s+='</svg>';
   $('dayChart').innerHTML=s;
-  $('dayDonut').innerHTML=dayDonut(m,d);
+  $('dayDonut').innerHTML=dayDonut(m,d)+dayGasDonut(m,d);
   $('daySummary').innerHTML=`Gas ${d.g.toFixed(1)} kWh (${gbp(d.gc)}), of which ${d.night.toFixed(1)} kWh overnight${cheapN?'':' (shaded)'} · Electricity ${d.e.toFixed(1)} kWh from the grid (${gbp(d.ec)})${cheapN?`, ${d.e?Math.round(cheapK/d.e*100):0}% in the cheap-rate hours (shaded blue)`:''} · Total ${gbp(d.cost)}`;
 }
 
@@ -687,6 +687,28 @@ function dayDonut(m,d){if(!m.raw.elec)return'';const r=peakStats(m,[d])[0],B=Num
   const v=t<0.3?'<b class="good">✓ No electricity from the grid</b>: solar and the battery covered the whole day.':r.peak<0.5?'<b class="good">✓ All electricity off-peak</b>: the battery covered the peak hours.':B&&r.peak<=B?`<b class="bad">${r.peak.toFixed(1)} kWh of electricity at peak</b> (${gbp(r.peakCost)}): the ${B} kWh battery ran out or wasn't full. Check it charged to 100% overnight and the car didn't drain it.`:`<b class="bad">${r.peak.toFixed(1)} kWh of electricity at peak</b> (${gbp(r.peakCost)}): more than the ${B||6} kWh battery can hold, so some peak use is unavoidable unless the day's use comes down.`;
   return `<h3>Electricity from the grid: off-peak vs peak${d.complete?'':' (so far)'}</h3><div class="legend"><span><i class="dot" style="background:var(--elec)"></i>Off-peak electricity ${r.cheap.toFixed(1)} kWh</span><span><i class="dot" style="background:var(--warn)"></i>Peak electricity ${r.peak.toFixed(1)} kWh</span></div>
   <div style="display:flex;gap:14px;align-items:center;margin:6px 0">${donut(r.cheap,r.peak,110)}<div class="sub" style="margin:0">${v}</div></div>`}
+// Gas by time of day: night / morning / daytime / evening
+const GP=[['Night','00–06',0,6,'var(--gp1)'],['Morning','06–09',6,9,'var(--gp2)'],['Daytime','09–16',9,16,'var(--gp3)'],['Evening','16–24',16,24,'var(--gp4)']];
+function gasSplit(d){return GP.map(([n,l,a,b])=>{let v=0;for(let j=a*2;j<b*2;j++)v+=d.hhG[j]||0;return v})}
+function ring(vals,cols,size,mid,sub){const t=vals.reduce((a,b)=>a+b,0),r=size/2-size*0.11,c=2*Math.PI*r,sw=size*0.18,gap=vals.filter(v=>v>0).length>1?2:0;
+  let s=`<svg viewBox="0 0 ${size} ${size}" width="${size}" height="${size}" style="width:${size}px;height:${size}px;flex:none" role="img" aria-label="${esc(mid)}">`;
+  if(t<=0)s+=`<circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="var(--line)" stroke-width="${sw}"/>`;
+  else{let o=0;vals.forEach((v,i)=>{if(v<=0)return;const L=Math.max(0.5,v/t*c-gap);s+=`<circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="${cols[i]}" stroke-width="${sw}" stroke-dasharray="${L.toFixed(2)} ${c.toFixed(2)}" stroke-dashoffset="${(-o).toFixed(2)}" transform="rotate(-90 ${size/2} ${size/2})"/>`;o+=v/t*c})}
+  s+=`<text x="${size/2}" y="${size/2+size*(sub?0.03:0.07)}" text-anchor="middle" style="font-size:${(size*0.19).toFixed(0)}px;font-weight:700;fill:var(--ink)">${mid}</text>`;
+  if(sub)s+=`<text x="${size/2}" y="${size/2+size*0.19}" text-anchor="middle" style="font-size:${Math.max(9,size*0.1).toFixed(0)}px;fill:var(--muted)">${sub}</text>`;
+  return s+'</svg>'}
+const gasLegend=v=>{const t=v.reduce((a,b)=>a+b,0)||1;return `<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 12px;font-size:13.5px;margin:4px 0 10px;max-width:440px">${GP.map((p,i)=>`<div style="line-height:1.3"><i class="dot" style="background:${p[4]}"></i>${p[0]} <span style="color:var(--muted)">${p[1]}</span><br><span style="padding-left:15px"><b>${v[i].toFixed(0)} kWh</b> · ${Math.round(v[i]/t*100)}%</span></div>`).join('')}</div>`};
+function dayGasDonut(m,d){if(!m.raw.gas)return'';const v=gasSplit(d),t=v.reduce((a,b)=>a+b,0);
+  const note=!t?'No gas used.':v[0]>t*0.15?`<b class="bad">${v[0].toFixed(0)} kWh overnight</b>: the heating was on between midnight and 6am. A night setback (or off) saves most of that.`:v[2]>t*0.45?`Most of the gas went in the daytime. On days she's out, turning the heating down or off then saves the most.`:`<b class="good">Little gas overnight</b>; most was used morning and evening.`;
+  return `<h3>Gas: when it was burned${d.complete?'':' (so far)'}</h3>
+  <div style="display:flex;gap:14px;align-items:center;margin:6px 0">${ring(v,GP.map(p=>p[4]),110,t.toFixed(0),'kWh gas')}<div class="sub" style="margin:0">${note}</div></div>${gasLegend(v)}`}
+function gasDays(m){if(!m.raw.gas)return'';const done=m.days.filter(d=>d.complete&&d.g>0).slice(-14).reverse(),wk=done.slice(0,7);if(!done.length)return'';
+  const wv=GP.map((_,i)=>wk.reduce((s,d)=>s+gasSplit(d)[i],0)),wt=wv.reduce((a,b)=>a+b,0),cols=GP.map(p=>p[4]);
+  return `<h3>Gas: when it's burned, day by day</h3><p class="sub" style="margin-top:0">Gas is the same price all day, so this is about when the heating runs, not the rate. Night gas means the heating is on overnight; daytime gas is what turning it down when she's out would save.</p>
+  <div style="display:flex;gap:14px;align-items:center;margin:6px 0 10px">${ring(wv,cols,120,wt.toFixed(0),'kWh')}
+    <div><div class="sub" style="margin:0">Last 7 days</div><div style="font-size:20px;font-weight:700">${gbp(wk.reduce((s,d)=>s+d.gc,0))}</div><div class="sub" style="margin:0">of gas, ${wt?Math.round(wv[0]/wt*100):0}% of it overnight and ${wt?Math.round(wv[2]/wt*100):0}% in the daytime</div></div></div>
+  ${gasLegend(wv)}
+  <div class="donuts">${done.map(d=>{const v=gasSplit(d),t=v.reduce((a,b)=>a+b,0);return `<div class="dday" data-day="${d.key}" role="button" style="cursor:pointer">${ring(v,cols,64,t.toFixed(0))}<div class="dl">${niceDay(d.key)}</div><div class="dv">${gbp(d.gc)}${v[0]>t*0.15?' · night on':''}</div></div>`}).join('')}</div>`}
 // Day by day: share of grid electricity in the cheap hours, with the battery check
 function offPeakDays(m){if(!m.raw.elec)return'';const done=m.days.filter(d=>d.complete),rows=peakStats(m,done.slice(-14)).reverse(),wk=rows.slice(0,7);
   const B=Number(cfg.batt)||0,ok=r=>r.peak<0.5,sum=(a,f)=>a.reduce((s,x)=>s+f(x),0);
