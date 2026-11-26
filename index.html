@@ -219,10 +219,11 @@ details .sub{margin:0 0 10px}
 <script>
 (function(){
 'use strict';
-const VERSION='2026-11-26f';
+const VERSION='2026-11-26g';
 const API='https://api.octopus.energy/v1';
 (function selfUpdate(){try{fetch(location.pathname+'?v='+Date.now(),{cache:'no-store'}).then(r=>r.text()).then(t=>{const m=t.match(/const VERSION='([^']+)'/);
   if(m&&m[1]!==VERSION&&sessionStorage.getItem('he_reloaded')!==m[1]){sessionStorage.setItem('he_reloaded',m[1]);location.reload()}}).catch(()=>{})}catch(e){}})();
+const QDEF=[{id:'q1',nm:'E.ON Next Drive Fixed V37',sup:'E.ON Next',fixed:true,off:8.5,a:'00:00',b:'06:00',peak:34.452,esc:57.143,gu:8.808,gsc:29.771,exit:'None',src:'Uswitch quote, 26 Nov 2026'}];
 const DEF={key:'',acct:'',dd:105,gasFactor:11.36,bal:0,baseGas:2.7,temp:21,batt:6,loc:'53.65,-1.78',hoursOut:18,rads:13,radsDay:4,dysonKw:2,heaterKw:2,tempPrev:21,tempDate:''};
 const TZ='Europe/London';
 const $=id=>document.getElementById(id);
@@ -235,6 +236,7 @@ const idb={open(){return new Promise((ok,no)=>{try{const r=indexedDB.open('home-
   async get(k){try{const d=await idb.open();return await new Promise(ok=>{const r=d.transaction('kv').objectStore('kv').get(k);r.onsuccess=()=>ok(r.result);r.onerror=()=>ok(null)})}catch(e){return null}}};
 function saveCfg(){store.set('he_cfg',cfg);idb.set('he_cfg',cfg)}
 try{navigator.storage&&navigator.storage.persist&&navigator.storage.persist()}catch(e){}
+if(!Array.isArray(cfg.quotes)){cfg.quotes=QDEF.slice();if(storedCfg)saveCfg()}
 if(storedCfg&&!storedCfg.battSet){if(Number(cfg.batt)===9)cfg.batt=6;cfg.battSet=1;saveCfg()}
 if(storedCfg&&storedCfg.tempDate===undefined){ // she turned the heating down to 17°C on 19 Nov 2026
   const t=Number(storedCfg.temp)||21;cfg.tempPrev=t<21?21:t;cfg.temp=t<21?t:17;cfg.tempDate='2026-11-19';saveCfg()}
@@ -609,10 +611,11 @@ function priceSmart(m,days,unit,sc){
 }
 const EXT=[
     {nm:'EDF GoElectric',sup:'EDF',off:6.66,a:23,b:6,peak:33.52,sc:66.82,note:'Any EV and charger. £75 exit fee.'},
-    {nm:'E.ON Next Drive Fixed V37',sup:'E.ON Next',off:8.5,a:0,b:6,peak:34.45,sc:57.14,note:'No exit fee. Smart meter needed.'},
     {nm:'E.ON Next Drive Smart',sup:'E.ON Next',off:6.5,a:0,b:6,peak:29.12,sc:60,note:'Needs an eligible car or charger linked to the E.ON app.'},
     {nm:'So Energy So EV',sup:'So Energy',off:7.14,a:0,b:5,peak:41.5,sc:54,note:''},
     {nm:'British Gas EV Power',sup:'British Gas',off:9.5,a:0,b:5,peak:36.5,sc:50,note:''}];
+const qMin=v=>{const [h,mm]=String(v||'0:0').split(':').map(Number);return h*60+(mm||0)};
+const quoteRate=q=>{const a=qMin(q.a),b=qMin(q.b);return t=>{const [hh,mm]=hm(new Date(t)).split(':').map(Number),x=hh*60+mm;return (a<b?(x>=a&&x<b):(x>=a||x<b))?Number(q.off):Number(q.peak)}};
 const extRate=x=>t=>{const hr=hourOf(new Date(t));return (x.a<x.b?(hr>=x.a&&hr<x.b):(hr>=x.a||hr<x.b))?x.off:x.peak};
 let tDays=null;
 function renderTariff(m,days){
@@ -627,14 +630,16 @@ function renderTariff(m,days){
   add({nm:curName,sup:'Octopus',fixed:/FIX/.test(e.tariff),cur:true,note:''},(e.curUnit&&e.curUnit.length)?e.curUnit:e.unit,(e.curSc&&e.curSc.length)?e.curSc:e.sc);
   for(const a of m.raw.alts||[])if(a.name!==curName)add({nm:a.name,sup:'Octopus',fixed:!!a.fixed,note:reqs[a.name]||''},a.unit,a.sc);
   for(const f of m.raw.fixes||[])if(f.eu!=null)add({nm:f.name,sup:'Octopus',fixed:true,note:'Single price all day, so no cheap hours.'},()=>f.eu,()=>f.es);
-  if(scope==='all')for(const x of EXT)add({nm:x.nm,sup:x.sup,fixed:true,note:(x.note?x.note+' ':'')+'Published Yorkshire rates; get a quote.'},extRate(x),()=>x.sc);
+  if(scope==='all')for(const q of cfg.quotes||[])if(q.peak>0)add({nm:q.nm,sup:q.sup||'',fixed:!!q.fixed,quote:q.id,note:`${q.off}p ${q.a}–${q.b}, ${q.peak}p other times, ${q.esc}p/day. Exit fee: ${q.exit||'?'}. ${q.src||'Your quote'}.`},quoteRate(q),()=>Number(q.esc));
+  if(scope==='all')for(const x of EXT)if(!(cfg.quotes||[]).some(q=>q.nm===x.nm))add({nm:x.nm,sup:x.sup,fixed:true,note:(x.note?x.note+' ':'')+'Published Yorkshire rates; get a quote.'},extRate(x),()=>x.sc);
   // ---- gas: annual use (weather-adjusted where available) on each price
   const g=m.raw.gas,G=[];let aG=0;
   if(g){aG=model.aGas||g.eac||0;if(!aG){const ds=m.days.filter(d=>d.complete).slice(-365);aG=ds.reduce((s,d)=>s+d.g,0)/Math.max(1,ds.length)*365}
     const gu=rateAt(g.unit,now)||0,gs=rateAt(g.sc,now)||0,gy=(u,sc)=>(aG*u+365*sc)/100;
     G.push({nm:/VAR/.test(g.tariff)?'Flexible Octopus':'Current gas tariff',sup:'Octopus',fixed:/FIX/.test(g.tariff),cur:true,base:gy(gu,gs),note:`${gu.toFixed(2)}p/kWh · ${gs.toFixed(2)}p/day`});
     for(const f of m.raw.fixes||[])if(f.gu!=null)G.push({nm:f.name,sup:'Octopus',fixed:true,base:gy(f.gu,f.gs||gs),note:`${f.gu.toFixed(2)}p/kWh · ${(f.gs||gs).toFixed(2)}p/day`});
-    if(scope==='all')G.push({nm:'E.ON Next Drive Fixed V37 (gas)',sup:'E.ON Next',fixed:true,base:gy(8.808,29.771),note:'8.81p/kWh · 29.77p/day, dual fuel with Next Drive V37 electricity. No exit fee. Uswitch quote, 26 Nov 2026.'});
+    if(scope==='all')for(const q of cfg.quotes||[])if(q.gu>0)G.push({nm:q.nm,sup:q.sup||'',fixed:!!q.fixed,quote:q.id,base:gy(Number(q.gu),Number(q.gsc)),note:`${q.gu}p/kWh · ${q.gsc}p/day. ${q.src||'Your quote'}.`});
+    if(0)G.push({nm:'E.ON Next Drive Fixed V37 (gas)',sup:'E.ON Next',fixed:true,base:gy(8.808,29.771),note:'8.81p/kWh · 29.77p/day, dual fuel with Next Drive V37 electricity. No exit fee. Uswitch quote, 26 Nov 2026.'});
     if(scope==='all')G.push({nm:'EDF Simply Tracker',sup:'EDF',fixed:false,base:gy(gu,gs)-25,note:'Follows the price cap, with £25 a year off the gas standing charge. Exit fees apply.'})}
   const gp=v=>'£'+Math.round(v).toLocaleString('en-GB');
   const cost=(x,rise)=>x.fixed?x.base:x.base*(1+rise/100);
@@ -649,10 +654,33 @@ function renderTariff(m,days){
     <table>${sorted.slice(0,6).concat(sorted.slice(6).filter(x=>x.cur)).map(x=>`<tr${x.cur?' style="background:var(--okbg)"':''}><td>${esc(x.nm)}${x.cur?' <b>(now)</b>':''}<div class="sub" style="margin:0">${esc(x.sup)} · ${x.fixed?'fixed':'variable'}</div></td>
       <td class="n" style="white-space:nowrap"><b>${gp(x.c/12)}</b>/mo<div class="sub" style="margin:0">${x.cur?gp(x.c)+'/yr':(x.c<cur.c?'−':'+')+gp(Math.abs(x.c-cur.c))+'/yr'}</div></td></tr>`).join('')}</table>
     <p class="sub" style="margin:6px 0 0">${unitNote}</p></div>`};
-  el.innerHTML=`<div class="chips" role="tablist"><button class="chip ${scope==='all'?'on':''}" data-scope="all">All suppliers</button><button class="chip ${scope==='oct'?'on':''}" data-scope="oct">Octopus only</button></div>`+
+  // both fuels: her current pair, best Octopus pair, each quote with both fuels, best mix
+  E.forEach(x=>x.c=cost(x,rE));G.forEach(x=>x.c=cost(x,rG));
+  const T=[],ce=E.find(x=>x.cur),cg=G.find(x=>x.cur),mn=L=>L.slice().sort((a,b)=>a.c-b.c)[0];
+  if(ce&&cg)T.push({nm:'Stay as she is',det:`${ce.nm} + ${cg.nm}`,c:ce.c+cg.c,cur:true});
+  const oe=mn(E.filter(x=>x.sup==='Octopus')),og=mn(G.filter(x=>x.sup==='Octopus'));if(oe&&og)T.push({nm:'Best on Octopus',det:`${oe.nm} + ${og.nm}`,c:oe.c+og.c});
+  for(const q of scope==='all'?cfg.quotes||[]:[]){const qe=E.find(x=>x.quote===q.id),qg=G.find(x=>x.quote===q.id);if(qe&&qg)T.push({nm:q.nm,det:`${q.sup} for both fuels · ${q.fixed?'fixed':'variable'} · exit fee ${q.exit||'?'}`,c:qe.c+qg.c})}
+  T.sort((a,b)=>a.c-b.c);const tc=T.find(x=>x.cur),tb=T[0];
+  const both=T.length>1?`<div class="card" style="margin:0 0 12px;border:2px solid var(--accent)"><div class="sub" style="margin:0">Gas and electricity together: cheapest</div>
+    <div style="font-size:22px;font-weight:700;margin:2px 0">${esc(tb.nm)}</div><div>${gp(tb.c/12)} a month${tc&&!tb.cur?` · <b class="good">${gp(tc.c-tb.c)} a year less</b> than staying as she is`:''}</div>
+    <table style="margin-top:8px">${T.map(x=>`<tr${x.cur?' style="background:var(--okbg)"':''}><td>${esc(x.nm)}<div class="sub" style="margin:0">${esc(x.det)}</div></td><td class="n" style="white-space:nowrap"><b>${gp(x.c/12)}</b>/mo<div class="sub" style="margin:0">${gp(x.c)}/yr</div></td></tr>`).join('')}</table>
+    <p class="sub" style="margin:6px 0 0">Using the price rises set on the cards below (electricity ${rE>0?'+':''}${rE}%, gas ${rG>0?'+':''}${rG}% on variable tariffs).</p></div>`:'';
+  const Q=cfg.quotes||[],fld=(k,l,v,t)=>`<label class="sub" style="display:block;margin:6px 0 0">${l}<input data-q="${k}" value="${esc(v??'')}" ${t?`type="${t}"`:''} inputmode="${t==='number'?'decimal':'text'}"></label>`;
+  const quotes=`<details class="card" style="margin:0 0 12px"><summary><b>Quotes (${Q.length})</b> <span class="sub">add rates from Uswitch or a supplier</span></summary>
+    ${Q.map(q=>`<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--line)"><div>${esc(q.nm)}<div class="sub" style="margin:0">Elec ${q.off}p ${q.a}–${q.b} / ${q.peak}p · ${q.esc}p/day${q.gu?` · Gas ${q.gu}p · ${q.gsc}p/day`:''}</div></div><button class="chip" data-qdel="${q.id}">Remove</button></div>`).join('')}
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 10px;margin-top:6px">${fld('nm','Tariff name','')}${fld('sup','Supplier','')}${fld('off','Cheap rate p/kWh','','number')}${fld('peak','Other times p/kWh','','number')}${fld('a','Cheap from (hh:mm)','00:00')}${fld('b','Cheap until (hh:mm)','06:00')}${fld('esc','Elec standing p/day','','number')}${fld('gu','Gas p/kWh (blank if none)','','number')}${fld('gsc','Gas standing p/day','','number')}${fld('exit','Exit fee','')}</div>
+    <label class="sub" style="display:flex;gap:8px;align-items:center;margin:8px 0"><input type="checkbox" data-q="fixed" checked style="width:auto"> Fixed price</label>
+    <button id="qAdd">Add quote</button> <span id="qMsg" class="sub"></span>
+    <p class="sub">For a single-rate tariff, put the same price in both rate boxes.</p></details>`;
+  el.innerHTML=`<div class="chips" role="tablist"><button class="chip ${scope==='all'?'on':''}" data-scope="all">All suppliers</button><button class="chip ${scope==='oct'?'on':''}" data-scope="oct">Octopus only</button></div>`+both+
     card('Electricity',E,rE,'riseE',`Her last ${n} days of half-hourly readings, priced on each tariff with the car and the ${Number(cfg.batt)||0} kWh battery charging in its cheap hours. The rise applies to variable tariffs only; fixed prices don't change. January's price cap for Yorkshire is about +25% on electricity.`)+
-    card('Gas',G,rG,'riseG',`About ${Math.round(aG).toLocaleString('en-GB')} kWh a year of gas, adjusted for the weather. January's price cap for Yorkshire is about +38% on gas. ${scope==='all'?"Other suppliers' gas fixes aren't published per region in a form the app can read, so get quotes to compare those.":''}`)+
+    card('Gas',G,rG,'riseG',`About ${Math.round(aG).toLocaleString('en-GB')} kWh a year of gas, adjusted for the weather. January's price cap for Yorkshire is about +38% on gas.`)+quotes+
     `<p class="sub">Solar export isn't counted. Outgoing Octopus pays 12p/kWh but only to Octopus customers, so moving electricity elsewhere means a new export deal too.</p>`;
+  el.querySelectorAll('[data-qdel]').forEach(b=>b.addEventListener('click',()=>{cfg.quotes=(cfg.quotes||[]).filter(q=>q.id!==b.dataset.qdel);saveCfg();renderTariff(model)}));
+  const qa=$('qAdd');if(qa)qa.addEventListener('click',()=>{const q={id:'q'+Date.now()};el.querySelectorAll('[data-q]').forEach(i=>{const k=i.dataset.q;q[k]=i.type==='checkbox'?i.checked:(i.type==='number'?(i.value===''?0:Number(i.value)):i.value.trim())});
+    if(!q.nm||!(q.peak>0)||!(q.esc>0)){$('qMsg').textContent='Needs a name, both electricity rates and the standing charge.';return}
+    if(!(q.off>0))q.off=q.peak;if(!/^\d{1,2}:\d{2}$/.test(q.a))q.a='00:00';if(!/^\d{1,2}:\d{2}$/.test(q.b))q.b='00:00';q.src='Your quote, '+new Date().toLocaleDateString('en-GB');
+    cfg.quotes=(cfg.quotes||[]).concat(q);cfg.tScope='all';saveCfg();renderTariff(model)});
   el.querySelectorAll('[data-scope]').forEach(b=>b.addEventListener('click',()=>{cfg.tScope=b.dataset.scope;saveCfg();renderTariff(model)}));
   el.querySelectorAll('[data-rise]').forEach(b=>b.addEventListener('click',()=>{const k=b.dataset.rise;cfg[k]=Math.max(-30,Math.min(80,(cfg[k]??(k==='riseE'?25:38))+Number(b.dataset.d)));saveCfg();renderTariff(model)}));
 }
