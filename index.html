@@ -219,7 +219,7 @@ details .sub{margin:0 0 10px}
 <script>
 (function(){
 'use strict';
-const VERSION='2026-11-26b';
+const VERSION='2026-11-26c';
 const API='https://api.octopus.energy/v1';
 (function selfUpdate(){try{fetch(location.pathname+'?v='+Date.now(),{cache:'no-store'}).then(r=>r.text()).then(t=>{const m=t.match(/const VERSION='([^']+)'/);
   if(m&&m[1]!==VERSION&&sessionStorage.getItem('he_reloaded')!==m[1]){sessionStorage.setItem('he_reloaded',m[1]);location.reload()}}).catch(()=>{})}catch(e){}})();
@@ -278,6 +278,20 @@ function dayMinRate(list,t){const k=dayKey(new Date(t)),base=Date.parse(k+'T00:0
 
 // Rates for every tariff agreement in the window, joined into one timeline, so each half hour is
 // priced on the tariff that was actually in force at the time.
+// Unit rates for a tariff. Most tariffs publish half-hourly "standard" rates; Intelligent Octopus Go (and Max) only publish
+// a day rate and a night rate, so build the half-hourly timeline from those: night 23:30–05:30 UK time (00:30–05:30 for Go).
+const lonOff=t=>/BST|GMT\+1/.test(new Date(t).toLocaleString('en-GB',{timeZone:'Europe/London',timeZoneName:'short'}))?36e5:0;
+async function unitRates(b,q){const u=await get(`${b}/standard-unit-rates/?${q}&page_size=1500`);if(u&&u.length)return u;
+  const [dy,nt]=await Promise.all([get(`${b}/day-unit-rates/?page_size=50`).catch(()=>[]),get(`${b}/night-unit-rates/?page_size=50`).catch(()=>[])]);
+  const D=ddOnly(dy),N=ddOnly(nt);if(!D.length||!N.length)return [];
+  const qp=new URLSearchParams(q),f=Math.min(Date.parse(qp.get('period_from')||new Date().toISOString()),Date.now()-45*864e5),to=qp.get('period_to')?Date.parse(qp.get('period_to')):Date.now()+3*864e5;
+  const iog=/IOG|INTELLI/.test(b),ns=iog?-30:30,ne=330; // minutes from local midnight
+  const val=(L,t)=>{const x=L.find(r=>Date.parse(r.valid_from)<=t&&(!r.valid_to||Date.parse(r.valid_to)>t))||L[L.length-1];return x.value_inc_vat};
+  const out=[];let d0=Date.UTC(new Date(f).getUTCFullYear(),new Date(f).getUTCMonth(),new Date(f).getUTCDate())-864e5;
+  for(;d0<to+864e5;d0+=864e5){const off=lonOff(d0+12*36e5),a=d0+ns*6e4-off,e=d0+ne*6e4-off,nx=d0+864e5+ns*6e4-lonOff(d0+36*36e5);
+    out.push({value_inc_vat:val(N,a),valid_from:new Date(a).toISOString(),valid_to:new Date(e).toISOString(),payment_method:null});
+    out.push({value_inc_vat:val(D,e),valid_from:new Date(e).toISOString(),valid_to:new Date(nx).toISOString(),payment_method:null})}
+  return out.filter(r=>Date.parse(r.valid_to)>f&&Date.parse(r.valid_from)<to)}
 async function timeline(fuel,ags,fromISO){
   const end=new Date(Date.now()+3*864e5).toISOString(),from=Date.parse(fromISO);
   const list=(ags||[]).filter(a=>!a.valid_to||Date.parse(a.valid_to)>from).sort((a,b)=>Date.parse(a.valid_from)-Date.parse(b.valid_from));
@@ -287,7 +301,7 @@ async function timeline(fuel,ags,fromISO){
     const q=`period_from=${f}&period_to=${to}&page_size=1500`,b=`${API}/products/${pc}/${fuel}-tariffs/${tc}`;
     const clip=r=>{const vf=Math.max(Date.parse(r.valid_from),Date.parse(f)),vt=Math.min(r.valid_to?Date.parse(r.valid_to):Infinity,Date.parse(to));
       return vt>vf?Object.assign({},r,{valid_from:new Date(vf).toISOString(),valid_to:isFinite(vt)?new Date(vt).toISOString():null}):null};
-    const [u,s,prod]=await Promise.all([get(`${b}/standard-unit-rates/?${q}`),get(`${b}/standing-charges/?${q}`),get(`${API}/products/${pc}/`).catch(()=>({}))]);
+    const [u,s,prod]=await Promise.all([fuel==='electricity'?unitRates(b,q):get(`${b}/standard-unit-rates/?${q}`),get(`${b}/standing-charges/?${q}`),get(`${API}/products/${pc}/`).catch(()=>({}))]);
     ddOnly(u).map(clip).filter(Boolean).forEach(r=>unit.push(r));ddOnly(s).map(clip).filter(Boolean).forEach(r=>sc.push(r));
     periods.push({tariff:tc,product:pc,name:(prod&&prod.display_name)||pc,from:a.valid_from,to:a.valid_to||null});
   }));
@@ -312,17 +326,17 @@ async function fetchAll(){
     jobs.push(timeline('electricity',emp.agreements,from.toISOString()).then(async t=>{res.elec.unit=t.unit;res.elec.sc=t.sc;res.elec.periods=t.periods;
       const now=Date.now(),past=t.periods.filter(p=>Date.parse(p.from)<=now);
       if(past.length>1){const pv=past[past.length-2],b=`${API}/products/${pv.product}/electricity-tariffs/${pv.tariff}`;
-        try{const [u,sc]=await Promise.all([get(`${b}/standard-unit-rates/?${pf36}&page_size=1500`),get(`${b}/standing-charges/?${pf36}&page_size=1500`)]);res.elec.prev={name:pv.name,unit:ddOnly(u),sc:ddOnly(sc)}}catch(e){}}}));
+        try{const [u,sc]=await Promise.all([unitRates(b,pf36),get(`${b}/standing-charges/?${pf36}&page_size=1500`)]);res.elec.prev={name:pv.name,unit:ddOnly(u),sc:ddOnly(sc)}}catch(e){}}}));
     // current tariff's own rates for the last 36 days, to price recent usage as if it had all been on it
-    jobs.push(get(`${API}/products/${pc}/electricity-tariffs/${tc}/standard-unit-rates/?${pf36}&page_size=1500`).then(v=>res.elec.curUnit=ddOnly(v)).catch(()=>{}));
+    jobs.push(unitRates(`${API}/products/${pc}/electricity-tariffs/${tc}`,pf36).then(v=>res.elec.curUnit=ddOnly(v)).catch(()=>{}));
     jobs.push(get(`${API}/products/${pc}/electricity-tariffs/${tc}/standing-charges/?${pf36}&page_size=1500`).then(v=>res.elec.curSc=ddOnly(v)).catch(()=>{}));
     res.elec.next=(emp.agreements||[]).filter(a=>Date.parse(a.valid_from)>Date.now()).map(a=>({tariff:a.tariff_code,from:a.valid_from}))[0]||null;
     jobs.push(get(`${API}/products/?is_variable=true&brand=OCTOPUS_ENERGY&page_size=100`).then(async ps=>{
-      const want=[['Agile Octopus',/^AGILE-(?!OUTGOING)/],['Octopus Flux',/^FLUX-IMPORT-/],['Octopus Go',/^GO-VAR-/]];
+      const want=[['Agile Octopus',/^AGILE-(?!OUTGOING)/],['Octopus Flux',/^FLUX-IMPORT-/],['Octopus Go',/^GO-VAR-/],['Intelligent Octopus Go',x=>/^IOG-/.test(x.code)&&x.display_name==='Intelligent Octopus Go'],['Intelligent Octopus Go Max',x=>/^IOG-/.test(x.code)&&/Max/.test(x.display_name)]];
       res.alts=[];
-      for(const [name,re] of want){const p=ps.find(x=>re.test(x.code));if(!p)continue;
+      for(const [name,re] of want){const p=ps.find(x=>typeof re==='function'?re(x):re.test(x.code));if(!p)continue;
         const atc=`E-1R-${p.code}-${res.elec.region}`;
-        try{const [u,s]=await Promise.all([get(`${API}/products/${p.code}/electricity-tariffs/${atc}/standard-unit-rates/?${pf36}&page_size=1500`),get(`${API}/products/${p.code}/electricity-tariffs/${atc}/standing-charges/?${pf36}&page_size=1500`)]);
+        try{const [u,s]=await Promise.all([unitRates(`${API}/products/${p.code}/electricity-tariffs/${atc}`,pf36),get(`${API}/products/${p.code}/electricity-tariffs/${atc}/standing-charges/?${pf36}&page_size=1500`)]);
           res.alts.push({name,code:p.code,unit:ddOnly(u),sc:ddOnly(s)})}catch(e){}}
     }).catch(()=>{}));
     jobs.push(get(`${API}/products/?is_variable=false&brand=OCTOPUS_ENERGY&page_size=100`).then(async ps=>{
@@ -954,7 +968,7 @@ function renderDD(m,done){
    add('valves','Rad valves',`Smart radiator valves${R?` (${R} radiators, ${U} on in the day)`:''}`,v,`Heat only the rooms she's using. Rooms left off still lose some heat to the rest of the house, so this counts half the saving, plus 3% from better control. ${R||13} valves cost roughly £${(R||13)*31}–£${(R||13)*75} plus a hub. Turning ordinary valves down to 1–2 in unused rooms is free.`,'heat');}
   model.noOct=model.noExt=null;
   if(m.raw.elec&&done.length>=14){const d30=done.slice(-30),base=priceSmart(m,d30,m.raw.elec.unit,m.raw.elec.sc);
-    const ti=tariffInfo(m),onCur=nm=>ti.curName&&ti.curName.toLowerCase().replace(/\s+/g,' ').includes(nm.toLowerCase());
+    const ti=tariffInfo(m),onCur=nm=>ti.curName&&ti.curName.toLowerCase().replace(/\s+/g,' ').trim()===nm.toLowerCase();
     let ref=base?base.asis:0;
     if(ti.tou&&m.raw.elec.curUnit&&m.raw.elec.curUnit.length){const cv=priceSmart(m,d30,m.raw.elec.curUnit,m.raw.elec.curSc||m.raw.elec.sc);
       if(cv){ref=cv.smart;add('cheap','Cheap hours',`Use ${esc(ti.curName)}'s cheap hours fully`,(cv.asis-cv.smart)*365/d30.length,`Car charger on a 00:30–05:30 schedule at full 7 kW, and the house battery charging from the grid in the same window. Worked out from her last ${d30.length} days of readings at ${esc(ti.curName)} prices.`,'elec')}}
@@ -962,7 +976,7 @@ function renderDD(m,done){
     // best Octopus alternative (all Octopus tariffs the page prices, except the one she's on)
     let bo=null;
     for(const a of (m.raw.alts||[])){if(onCur(a.name)||!base)continue;const v=priceSmart(m,d30,a.unit,a.sc);if(v){const sv=(ref-v.smart)*365/d30.length;if(!bo||sv>bo.sv)bo={nm:a.name,sv}}}
-    const reqs={'Octopus Flux':'Needs the solar installation certificate. Also pays for exported solar, not counted here.','Octopus Go':'Needs Octopus to accept the car.','Agile Octopus':'Prices change every half hour.'};
+    const reqs={'Octopus Flux':'Needs the solar installation certificate. Also pays for exported solar, not counted here.','Octopus Go':'Needs Octopus to accept the car.','Agile Octopus':'Prices change every half hour.','Intelligent Octopus Go':'Needs a car or charger Octopus can control.','Intelligent Octopus Go Max':'Needs a car or charger Octopus can control.'};
     if(bo){if(bo.sv>1)add('octalt',bo.nm.replace('Octopus ','').replace(' Octopus',''),`Best Octopus alternative: ${bo.nm}`,bo.sv,`${reqs[bo.nm]||''} ${altNote}`,'tariff');
       else model.noOct=`No other Octopus tariff beats ${ti.curName||'her current one'} for her usage (the closest, ${bo.nm}, would cost ${gbp(-bo.sv/12)} a month more).`}
     // best other supplier (published EV tariffs, priced on her half-hours)
