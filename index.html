@@ -219,7 +219,7 @@ details .sub{margin:0 0 10px}
 <script>
 (function(){
 'use strict';
-const VERSION='2026-11-26g';
+const VERSION='2026-11-26h';
 const API='https://api.octopus.energy/v1';
 (function selfUpdate(){try{fetch(location.pathname+'?v='+Date.now(),{cache:'no-store'}).then(r=>r.text()).then(t=>{const m=t.match(/const VERSION='([^']+)'/);
   if(m&&m[1]!==VERSION&&sessionStorage.getItem('he_reloaded')!==m[1]){sessionStorage.setItem('he_reloaded',m[1]);location.reload()}}).catch(()=>{})}catch(e){}})();
@@ -636,8 +636,9 @@ function renderTariff(m,days){
   const g=m.raw.gas,G=[];let aG=0;
   if(g){aG=model.aGas||g.eac||0;if(!aG){const ds=m.days.filter(d=>d.complete).slice(-365);aG=ds.reduce((s,d)=>s+d.g,0)/Math.max(1,ds.length)*365}
     const gu=rateAt(g.unit,now)||0,gs=rateAt(g.sc,now)||0,gy=(u,sc)=>(aG*u+365*sc)/100;
-    G.push({nm:/VAR/.test(g.tariff)?'Flexible Octopus':'Current gas tariff',sup:'Octopus',fixed:/FIX/.test(g.tariff),cur:true,base:gy(gu,gs),note:`${gu.toFixed(2)}p/kWh · ${gs.toFixed(2)}p/day`});
-    for(const f of m.raw.fixes||[])if(f.gu!=null)G.push({nm:f.name,sup:'Octopus',fixed:true,base:gy(f.gu,f.gs||gs),note:`${f.gu.toFixed(2)}p/kWh · ${(f.gs||gs).toFixed(2)}p/day`});
+    const gNow=(g.periods||[]).filter(x=>Date.parse(x.from)<=Date.now()).pop(),gName=gNow?gNow.name:(/VAR/.test(g.tariff)?'Flexible Octopus':'Current gas tariff');
+    G.push({nm:gName,sup:'Octopus',fixed:/FIX/.test(g.tariff),cur:true,base:gy(gu,gs),note:`${gu.toFixed(2)}p/kWh · ${gs.toFixed(2)}p/day`});
+    for(const f of m.raw.fixes||[])if(f.gu!=null&&f.name!==gName)G.push({nm:f.name,sup:'Octopus',fixed:true,base:gy(f.gu,f.gs||gs),note:`${f.gu.toFixed(2)}p/kWh · ${(f.gs||gs).toFixed(2)}p/day`});
     if(scope==='all')for(const q of cfg.quotes||[])if(q.gu>0)G.push({nm:q.nm,sup:q.sup||'',fixed:!!q.fixed,quote:q.id,base:gy(Number(q.gu),Number(q.gsc)),note:`${q.gu}p/kWh · ${q.gsc}p/day. ${q.src||'Your quote'}.`});
     if(0)G.push({nm:'E.ON Next Drive Fixed V37 (gas)',sup:'E.ON Next',fixed:true,base:gy(8.808,29.771),note:'8.81p/kWh · 29.77p/day, dual fuel with Next Drive V37 electricity. No exit fee. Uswitch quote, 26 Nov 2026.'});
     if(scope==='all')G.push({nm:'EDF Simply Tracker',sup:'EDF',fixed:false,base:gy(gu,gs)-25,note:'Follows the price cap, with £25 a year off the gas standing charge. Exit fees apply.'})}
