@@ -219,7 +219,7 @@ details .sub{margin:0 0 10px}
 <script>
 (function(){
 'use strict';
-const VERSION='2026-11-26e';
+const VERSION='2026-11-26f';
 const API='https://api.octopus.energy/v1';
 (function selfUpdate(){try{fetch(location.pathname+'?v='+Date.now(),{cache:'no-store'}).then(r=>r.text()).then(t=>{const m=t.match(/const VERSION='([^']+)'/);
   if(m&&m[1]!==VERSION&&sessionStorage.getItem('he_reloaded')!==m[1]){sessionStorage.setItem('he_reloaded',m[1]);location.reload()}}).catch(()=>{})}catch(e){}})();
@@ -634,6 +634,7 @@ function renderTariff(m,days){
     const gu=rateAt(g.unit,now)||0,gs=rateAt(g.sc,now)||0,gy=(u,sc)=>(aG*u+365*sc)/100;
     G.push({nm:/VAR/.test(g.tariff)?'Flexible Octopus':'Current gas tariff',sup:'Octopus',fixed:/FIX/.test(g.tariff),cur:true,base:gy(gu,gs),note:`${gu.toFixed(2)}p/kWh · ${gs.toFixed(2)}p/day`});
     for(const f of m.raw.fixes||[])if(f.gu!=null)G.push({nm:f.name,sup:'Octopus',fixed:true,base:gy(f.gu,f.gs||gs),note:`${f.gu.toFixed(2)}p/kWh · ${(f.gs||gs).toFixed(2)}p/day`});
+    if(scope==='all')G.push({nm:'E.ON Next Drive Fixed V37 (gas)',sup:'E.ON Next',fixed:true,base:gy(8.808,29.771),note:'8.81p/kWh · 29.77p/day, dual fuel with Next Drive V37 electricity. No exit fee. Uswitch quote, 26 Nov 2026.'});
     if(scope==='all')G.push({nm:'EDF Simply Tracker',sup:'EDF',fixed:false,base:gy(gu,gs)-25,note:'Follows the price cap, with £25 a year off the gas standing charge. Exit fees apply.'})}
   const gp=v=>'£'+Math.round(v).toLocaleString('en-GB');
   const cost=(x,rise)=>x.fixed?x.base:x.base*(1+rise/100);
