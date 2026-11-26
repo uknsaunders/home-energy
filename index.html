@@ -219,7 +219,7 @@ details .sub{margin:0 0 10px}
 <script>
 (function(){
 'use strict';
-const VERSION='2026-11-25e';
+const VERSION='2026-11-26a';
 const API='https://api.octopus.energy/v1';
 (function selfUpdate(){try{fetch(location.pathname+'?v='+Date.now(),{cache:'no-store'}).then(r=>r.text()).then(t=>{const m=t.match(/const VERSION='([^']+)'/);
   if(m&&m[1]!==VERSION&&sessionStorage.getItem('he_reloaded')!==m[1]){sessionStorage.setItem('he_reloaded',m[1]);location.reload()}}).catch(()=>{})}catch(e){}})();
@@ -582,7 +582,8 @@ function priceSmart(m,days,unit,sc){
   return {asis,smart:asis-carNow+carNew-bsave};
 }
 const EXT=[
-    {nm:'EDF GoElectric',off:6.99,a:23,b:6,peak:32.0,sc:50},
+    {nm:'EDF GoElectric',off:6.66,a:23,b:6,peak:33.52,sc:66.82},
+    {nm:'E.ON Next Drive Fixed V37',off:8.5,a:0,b:6,peak:34.32,sc:60},
     {nm:'E.ON Next Drive Smart',off:6.5,a:0,b:6,peak:29.12,sc:60},
     {nm:'So Energy So EV',off:7.14,a:0,b:5,peak:41.5,sc:54},
     {nm:'British Gas EV Power',off:9.5,a:0,b:5,peak:36.5,sc:50}];
@@ -967,7 +968,7 @@ function renderDD(m,done){
     // best other supplier (published EV tariffs, priced on her half-hours)
     let bx=null;
     for(const x of EXT){const v=priceSmart(m,d30,extRate(x),()=>x.sc);if(v){const sv=(ref-v.smart)*365/d30.length;if(!bx||sv>bx.sv)bx={nm:x.nm,sv,x}}}
-    if(bx){if(bx.sv>1)add('extalt',bx.nm.split(' ')[0],`Best other supplier: ${bx.nm}`,bx.sv,`${bx.x.off}p ${String(bx.x.a).padStart(2,'0')}:00–${String(bx.x.b).padStart(2,'0')}:00, ${bx.x.peak}p other times, ${bx.x.sc}p a day (published rates, mid-November 2026; get a quote for her postcode). May need a UK-registered car. ${altNote}`,'tariff');
+    if(bx){if(bx.sv>1)add('extalt',bx.nm.split(' ')[0],`Best other supplier: ${bx.nm}`,bx.sv,`${bx.x.off}p ${String(bx.x.a).padStart(2,'0')}:00–${String(bx.x.b).padStart(2,'0')}:00, ${bx.x.peak}p other times, ${bx.x.sc}p a day (published Yorkshire rates, late November 2026; get a quote for her postcode). May need a UK-registered car. ${altNote}`,'tariff');
       else model.noExt=`No other supplier's EV tariff beats ${ti.curName||'her current one'} for her usage (the closest, ${bx.nm}, would cost ${gbp(-bx.sv/12)} a month more).`}}
   ms.sort((a,b)=>b.annual-a.annual);
   const prevOff=model.save&&model.save.off;const off=prevOff||new Set();
