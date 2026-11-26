@@ -219,7 +219,7 @@ details .sub{margin:0 0 10px}
 <script>
 (function(){
 'use strict';
-const VERSION='2026-11-26c';
+const VERSION='2026-11-26e';
 const API='https://api.octopus.energy/v1';
 (function selfUpdate(){try{fetch(location.pathname+'?v='+Date.now(),{cache:'no-store'}).then(r=>r.text()).then(t=>{const m=t.match(/const VERSION='([^']+)'/);
   if(m&&m[1]!==VERSION&&sessionStorage.getItem('he_reloaded')!==m[1]){sessionStorage.setItem('he_reloaded',m[1]);location.reload()}}).catch(()=>{})}catch(e){}})();
@@ -333,7 +333,7 @@ async function fetchAll(){
     res.elec.next=(emp.agreements||[]).filter(a=>Date.parse(a.valid_from)>Date.now()).map(a=>({tariff:a.tariff_code,from:a.valid_from}))[0]||null;
     jobs.push(get(`${API}/products/?is_variable=true&brand=OCTOPUS_ENERGY&page_size=100`).then(async ps=>{
       const want=[['Agile Octopus',/^AGILE-(?!OUTGOING)/],['Octopus Flux',/^FLUX-IMPORT-/],['Octopus Go',/^GO-VAR-/],['Intelligent Octopus Go',x=>/^IOG-/.test(x.code)&&x.display_name==='Intelligent Octopus Go'],['Intelligent Octopus Go Max',x=>/^IOG-/.test(x.code)&&/Max/.test(x.display_name)]];
-      res.alts=[];
+      res.alts=res.alts||[];
       for(const [name,re] of want){const p=ps.find(x=>typeof re==='function'?re(x):re.test(x.code));if(!p)continue;
         const atc=`E-1R-${p.code}-${res.elec.region}`;
         try{const [u,s]=await Promise.all([unitRates(`${API}/products/${p.code}/electricity-tariffs/${atc}`,pf36),get(`${API}/products/${p.code}/electricity-tariffs/${atc}/standing-charges/?${pf36}&page_size=1500`)]);
@@ -344,6 +344,10 @@ async function fetchAll(){
       for(const [name,re] of [['Octopus 12M Fixed',/^OE-FIX-12M-/],['Octopus 18M Fixed',/^OE-FIX-18M-/]]){const p=ps.find(x=>re.test(x.code));if(!p)continue;
         try{const b=`${API}/products/${p.code}`;const [eu,es,gu,gs]=await Promise.all([one(`${b}/electricity-tariffs/E-1R-${p.code}-${reg}/standard-unit-rates/`),one(`${b}/electricity-tariffs/E-1R-${p.code}-${reg}/standing-charges/`),one(`${b}/gas-tariffs/G-1R-${p.code}-${reg}/standard-unit-rates/`),one(`${b}/gas-tariffs/G-1R-${p.code}-${reg}/standing-charges/`)]);
           res.fixes.push({name,eu,es,gu,gs})}catch(e){}}
+      res.alts=res.alts||[];
+      for(const [name,re] of [['Octopus Go 12M Fixed',x=>/^GO-FIX-12M-/.test(x.code)],['Intelligent Octopus Go 12M Fixed',x=>/^IOG-/.test(x.code)&&/12M Fixed$/.test(x.display_name)]]){const p=ps.find(re);if(!p)continue;
+        const atc=`E-1R-${p.code}-${reg}`;try{const [u,sc]=await Promise.all([unitRates(`${API}/products/${p.code}/electricity-tariffs/${atc}`,pf36),get(`${API}/products/${p.code}/electricity-tariffs/${atc}/standing-charges/?page_size=10`)]);
+          res.alts.push({name,code:p.code,fixed:true,unit:ddOnly(u),sc:ddOnly(sc)})}catch(e){}}
     }).catch(()=>{}));
   }
   if(gmp){
@@ -573,6 +577,14 @@ function renderDay(){
   $('daySummary').innerHTML=`Gas ${d.g.toFixed(1)} kWh (${gbp(d.gc)}), of which ${d.night.toFixed(1)} kWh overnight${cheapN?'':' (shaded)'} · Electricity ${d.e.toFixed(1)} kWh from the grid (${gbp(d.ec)})${cheapN?`, ${d.e?Math.round(cheapK/d.e*100):0}% in the cheap-rate hours (shaded blue)`:''} · Total ${gbp(d.cost)}`;
 }
 
+// Price past readings at a tariff's prices today: each half-hour of the day at today's rate, and today's standing charge.
+// Used to compare tariffs fairly, including ones that didn't exist (or had different prices) when the readings were taken.
+function nowProfile(list){if(typeof list==='function'||!list||!list.length)return list;
+  const p=new Array(48).fill(null),k=dayKey(new Date()),b0=Date.parse(k+'T00:00:00Z')-2*36e5;
+  for(const dd of [0,-1,1,-2]){for(let h=0;h<56;h++){const t=b0+dd*864e5+h*18e5;const [hh,mm]=hm(new Date(t)).split(':').map(Number),j=hh*2+(mm>=30?1:0);if(p[j]==null){const v=rateAt(list,t);if(v!=null)p[j]=v}}}
+  const fb=p.find(v=>v!=null);return t=>{const [hh,mm]=hm(new Date(t)).split(':').map(Number),v=p[hh*2+(mm>=30?1:0)];return v==null?fb:v}}
+const latestSc=l=>{if(typeof l==='function'||!l||!l.length)return l;const x=l.reduce((a,b)=>Date.parse(b.valid_from)>Date.parse(a.valid_from)?b:a);return ()=>x.value_inc_vat};
+function priceNow(m,days,u,sc){return priceSmart(m,days,nowProfile(u),latestSc(sc))}
 function priceSmart(m,days,unit,sc){
   const rf=typeof unit==='function'?unit:(t=>rateAt(unit,t)),sf=typeof sc==='function'?sc:(t=>rateAt(sc,t));
   // Last N complete days on a tariff: as used, and with (a) the car charged at 7 kW in the cheapest night half-hours
@@ -596,62 +608,52 @@ function priceSmart(m,days,unit,sc){
   return {asis,smart:asis-carNow+carNew-bsave};
 }
 const EXT=[
-    {nm:'EDF GoElectric',off:6.66,a:23,b:6,peak:33.52,sc:66.82},
-    {nm:'E.ON Next Drive Fixed V37',off:8.5,a:0,b:6,peak:34.45,sc:57.14},
-    {nm:'E.ON Next Drive Smart',off:6.5,a:0,b:6,peak:29.12,sc:60},
-    {nm:'So Energy So EV',off:7.14,a:0,b:5,peak:41.5,sc:54},
-    {nm:'British Gas EV Power',off:9.5,a:0,b:5,peak:36.5,sc:50}];
+    {nm:'EDF GoElectric',sup:'EDF',off:6.66,a:23,b:6,peak:33.52,sc:66.82,note:'Any EV and charger. £75 exit fee.'},
+    {nm:'E.ON Next Drive Fixed V37',sup:'E.ON Next',off:8.5,a:0,b:6,peak:34.45,sc:57.14,note:'No exit fee. Smart meter needed.'},
+    {nm:'E.ON Next Drive Smart',sup:'E.ON Next',off:6.5,a:0,b:6,peak:29.12,sc:60,note:'Needs an eligible car or charger linked to the E.ON app.'},
+    {nm:'So Energy So EV',sup:'So Energy',off:7.14,a:0,b:5,peak:41.5,sc:54,note:''},
+    {nm:'British Gas EV Power',sup:'British Gas',off:9.5,a:0,b:5,peak:36.5,sc:50,note:''}];
 const extRate=x=>t=>{const hr=hourOf(new Date(t));return (x.a<x.b?(hr>=x.a&&hr<x.b):(hr>=x.a||hr<x.b))?x.off:x.peak};
+let tDays=null;
 function renderTariff(m,days){
-  const now=new Date(),r=[],n=days.length;
-  if(m.raw.elec)r.push(['Electricity',(rateAt(m.raw.elec.unit,now)||0).toFixed(2)+'p/kWh · '+(rateAt(m.raw.elec.sc,now)||0).toFixed(2)+'p/day']);
-  if(m.raw.gas)r.push(['Gas',(rateAt(m.raw.gas.unit,now)||0).toFixed(2)+'p/kWh · '+(rateAt(m.raw.gas.sc,now)||0).toFixed(2)+'p/day']);
-  const ti=tariffInfo(m);
-  if(ti.tou&&m.raw.elec)r[0]=['Electricity',`${(ti.cheapRate*100).toFixed(2)}p cheap hours · ${(ti.dayRate*100).toFixed(2)}p other times · ${(rateAt(m.raw.elec.sc,now)||0).toFixed(2)}p/day`];
-  let h=`<h3>Now: ${esc(ti.curName||'current tariff')}</h3><table>${r.map(x=>`<tr><td>${x[0]}</td><td class="n">${x[1]}</td></tr>`).join('')}</table>`;
-  for(const c of ti.changes){const k=dayKey(new Date(c.from)),after=m.days.filter(d=>d.complete&&d.key>=k),before=m.days.filter(d=>d.complete&&d.key<k).slice(-14);
-    if(!after.length){h+=`<p class="sub">Switched to ${esc(c.name)} on ${niceDay(k)}. Readings from then will appear in a day or two, and the comparison below will follow.</p>`;continue}
-    const avg=(a,f)=>a.reduce((s,x)=>s+f(x),0)/a.length,cheapShare=a=>{let ck=0,tk=0;for(const d of a){const mn=dayMinRate(m.raw.elec.unit,Date.parse(d.key+'T12:00:00Z'));const b0=Date.parse(d.key+'T00:00:00Z')-2*36e5;
-      for(let h2=0;h2<56;h2++){const tt=b0+h2*18e5;if(dayKey(new Date(tt))!==d.key)continue;const [hh,mm]=hm(new Date(tt)).split(':').map(Number),j=hh*2+(mm>=30?1:0),e=d.hhE[j]||0;tk+=e;if(rateAt(m.raw.elec.unit,tt)<=mn*1.01)ck+=e}}return tk?ck/tk:0};
-    h+=`<h3>Since switching to ${esc(c.name)} (${niceDay(k)})</h3><table><tr><th></th><th class="n">Before</th><th class="n">After</th></tr>
-      <tr><td>Electricity cost a day</td><td class="n">${gbp(avg(before,d=>d.ec))}</td><td class="n"><b>${gbp(avg(after,d=>d.ec))}</b></td></tr>
-      <tr><td>Grid electricity a day</td><td class="n">${avg(before,d=>d.e).toFixed(1)} kWh</td><td class="n">${avg(after,d=>d.e).toFixed(1)} kWh</td></tr>
-      <tr><td>Price paid per kWh</td><td class="n">${(avg(before,d=>d.ec)/Math.max(0.01,avg(before,d=>d.e))*100).toFixed(1)}p</td><td class="n">${(avg(after,d=>d.ec)/Math.max(0.01,avg(after,d=>d.e))*100).toFixed(1)}p</td></tr>
-      ${ti.tou?`<tr><td>Share used in the cheap hours</td><td class="n">–</td><td class="n">${Math.round(cheapShare(after)*100)}%</td></tr>`:''}</table>
-      <p class="sub">${after.length} day${after.length>1?'s':''} on ${esc(c.name)} against the ${before.length} days before. Standing charges included. The more of the electricity that falls in the cheap hours, the lower the price per kWh.</p>`}
-  if(m.raw.elec&&n>=14){
-    const rows=[[ti.changes.length?'What she actually paid':`${ti.curName||'Current tariff'} (now)`,'',m.raw.elec.unit,m.raw.elec.sc]].concat((m.raw.alts||[]).map(a=>[a.name,a.name==='Octopus Go'?(/\bgo\b/i.test(ti.curName)?' (her tariff)':'*'):a.name==='Octopus Flux'?'**':'',a.unit,a.sc]));
-    const priced=rows.map(([nm,mk,u,sc])=>({nm,mk,v:priceSmart(m,days,u,sc)})).filter(x=>x.v);
-    const base=priced[0]&&priced[0].v.asis;
-    h+=`<h3>Electricity on Octopus tariffs, last ${n} days</h3><table><tr><th>Tariff</th><th class="n">As used</th><th class="n">Cheap-hours charging†</th></tr>`+
-      priced.map((x,i)=>`<tr><td>${esc(x.nm)}${x.mk}</td><td class="n">${gbp(x.v.asis)}</td><td class="n"><b>${gbp(x.v.smart)}</b>${base&&i>0?`<div class="sub">${x.v.smart<base?'saves '+gbp(base-x.v.smart):'+'+gbp(x.v.smart-base).slice(1)}</div>`:''}</td></tr>`).join('')+
-      `</table><p class="sub">${/\bgo\b/i.test(ti.curName)?'':`* Octopus Go needs Octopus to accept the car. Its registration check uses the DVLA, so a Jersey-registered car fails until it's re-registered in the UK.<br>`}** Octopus Flux needs a solar installation certificate (MCS, or Octopus's route for systems without one).<br>† The car charged at full 7 kW in the cheapest night half-hours, and the house battery (${Number(cfg.batt)||0} kWh usable) charged overnight to cover dearer hours. Solar export income on Flux isn't included.</p>`}
-  // gas and fixed deals
-  const gT=days.reduce((s,d)=>s+d.g,0),eT=days.reduce((s,d)=>s+d.e,0);
-  if(m.raw.gas&&n>=14){const gu=(rateAt(m.raw.gas.unit,now)||0),gs=(rateAt(m.raw.gas.sc,now)||0);const flexG=(gT*gu+n*gs)/100;
-    h+=`<h3>Gas, last ${n} days</h3><table><tr><td>Flexible Octopus (now)</td><td class="n">${gbp(flexG)}</td></tr>`+
-      (m.raw.fixes||[]).filter(f=>f.gu!=null).map(f=>{const v=(gT*f.gu+n*(f.gs||0))/100;return `<tr><td>${esc(f.name)} <span class="sub">${f.gu.toFixed(2)}p/kWh</span></td><td class="n">${gbp(v)} <span class="sub">(${v<flexG?'−':'+'}${gbp(Math.abs(v-flexG)).slice(1)})</span></td></tr>`}).join('')+
-      `</table><p class="sub">Fixed prices are today's offers. Flexible follows the Ofgem price cap, which suppliers forecast to rise by roughly 20–28% on 1 January 2027. Ofgem confirms it by 25 November. If it rises that much, a fix at today's price could work out cheaper from January.</p>`}
-  // Other suppliers' EV tariffs, priced on her own half-hourly readings. Published rates (VAT included) from
-  // comparison sites, mid-November 2026; regional prices vary, so these are estimates.
-
-  if(m.raw.elec&&n>=14){const base=priceSmart(m,days,m.raw.elec.unit,m.raw.elec.sc);
-    const rows=EXT.map(x=>{const fn=t=>{const hr=hourOf(t);return (x.a<x.b?(hr>=x.a&&hr<x.b):(hr>=x.a||hr<x.b))?x.off:x.peak};return {x,v:priceSmart(m,days,fn,()=>x.sc)}}).filter(r=>r.v);
-    h+=`<h3>Other suppliers' EV tariffs, last ${n} days‡</h3><table><tr><th>Tariff</th><th class="n">As used</th><th class="n">Cheap-hours charging†</th></tr>`+
-      (base?`<tr><td>${tariffInfo(m).changes.length?'What she actually paid':esc(tariffInfo(m).curName||'Current tariff')+' (now)'}</td><td class="n">${gbp(base.asis)}</td><td class="n">${gbp(base.asis)}</td></tr>`:'')+
-      rows.map(r=>`<tr><td>${esc(r.x.nm)}*<div class="sub">${r.x.off}p ${String(r.x.a).padStart(2,'0')}:00–${String(r.x.b).padStart(2,'0')}:00 · ${r.x.peak}p other times · ${r.x.sc}p/day</div></td><td class="n">${gbp(r.v.asis)}</td><td class="n"><b>${gbp(r.v.smart)}</b>${base?`<div class="sub">${r.v.smart<base.asis?'saves '+gbp(base.asis-r.v.smart):'+'+gbp(r.v.smart-base.asis).slice(1)}</div>`:''}</td></tr>`).join('')+
-      `</table><p class="sub">* EV tariffs may need a UK-registered car.<br>‡ Published prices from comparison sites, mid-November 2026. Prices vary by region and change often, and some may still include 5% VAT, which is 0% on electricity at the moment. Check a quote for the postcode before switching.</p>`}
-  if(m.raw.gas&&n>=14){const gu=(rateAt(m.raw.gas.unit,now)||0),gs=(rateAt(m.raw.gas.sc,now)||0);const flexG=(gT*gu+n*gs)/100;
-    h+=`<h3>Gas from other suppliers, last ${n} days</h3><table><tr><td>Flexible Octopus (now, at the price cap)</td><td class="n">${gbp(flexG)}</td></tr>
-    <tr><td>British Gas Cap Tracker / EDF Simply Tracker<div class="sub">about £25 a year below the cap on gas</div></td><td class="n">${gbp(flexG-25*n/365)}</td></tr></table>
-    <p class="sub">Uswitch says no fixed deal currently beats the October price cap, but fixes may beat the January cap if the forecast rise happens. Compare again after Ofgem's announcement on 25 November.</p>`}
-  h+=`<h3>Solar export</h3><table>
-  <tr><td>EDF Export 12m (EDF customers)</td><td class="n">≈15p/kWh</td></tr>
-  <tr><td>E.ON Next Export Exclusive (E.ON customers)</td><td class="n">≈13–16.5p/kWh</td></tr>
-  <tr><td>Scottish Power SmartGen (any supplier)</td><td class="n">≈12p/kWh</td></tr>
-  <tr><td>Outgoing Octopus (Octopus customers)</td><td class="n">12p/kWh</td></tr></table>
-  <p class="sub">Export payments need the solar installation certificate. Her readings don't include an export meter, so export income isn't counted in the costs above.</p>`;
-  $('tariff').innerHTML=h;
+  if(days)tDays=days;days=tDays;const el=$('tariff');
+  if(!m.raw.elec||!days||days.length<14){el.innerHTML='<p class="sub">Needs two weeks of readings.</p>';return}
+  const n=days.length,yr=365/n,ti=tariffInfo(m),e=m.raw.elec,now=new Date();
+  const scope=cfg.tScope||'all',rE=cfg.riseE??25,rG=cfg.riseG??38;
+  const curName=ti.curName||'Current tariff';
+  const reqs={'Octopus Flux':'Needs the solar installation certificate.','Intelligent Octopus Go':'Needs a car or charger Octopus can control.','Intelligent Octopus Go 12M Fixed':'Needs a car or charger Octopus can control. £50 exit fee.','Intelligent Octopus Go Max':'Needs a car or charger Octopus can control.','Agile Octopus':'Price changes every half hour; priced on today\'s prices.','Octopus Go 12M Fixed':'Exit fee applies.'};
+  // ---- electricity: every tariff priced on her last n days, car and battery in each tariff's cheap hours
+  const E=[],add=(o,u,sc)=>{const v=priceNow(m,days,u,sc);if(v)E.push(Object.assign(o,{base:v.smart*yr}))};
+  add({nm:curName,sup:'Octopus',fixed:/FIX/.test(e.tariff),cur:true,note:''},(e.curUnit&&e.curUnit.length)?e.curUnit:e.unit,(e.curSc&&e.curSc.length)?e.curSc:e.sc);
+  for(const a of m.raw.alts||[])if(a.name!==curName)add({nm:a.name,sup:'Octopus',fixed:!!a.fixed,note:reqs[a.name]||''},a.unit,a.sc);
+  for(const f of m.raw.fixes||[])if(f.eu!=null)add({nm:f.name,sup:'Octopus',fixed:true,note:'Single price all day, so no cheap hours.'},()=>f.eu,()=>f.es);
+  if(scope==='all')for(const x of EXT)add({nm:x.nm,sup:x.sup,fixed:true,note:(x.note?x.note+' ':'')+'Published Yorkshire rates; get a quote.'},extRate(x),()=>x.sc);
+  // ---- gas: annual use (weather-adjusted where available) on each price
+  const g=m.raw.gas,G=[];let aG=0;
+  if(g){aG=model.aGas||g.eac||0;if(!aG){const ds=m.days.filter(d=>d.complete).slice(-365);aG=ds.reduce((s,d)=>s+d.g,0)/Math.max(1,ds.length)*365}
+    const gu=rateAt(g.unit,now)||0,gs=rateAt(g.sc,now)||0,gy=(u,sc)=>(aG*u+365*sc)/100;
+    G.push({nm:/VAR/.test(g.tariff)?'Flexible Octopus':'Current gas tariff',sup:'Octopus',fixed:/FIX/.test(g.tariff),cur:true,base:gy(gu,gs),note:`${gu.toFixed(2)}p/kWh · ${gs.toFixed(2)}p/day`});
+    for(const f of m.raw.fixes||[])if(f.gu!=null)G.push({nm:f.name,sup:'Octopus',fixed:true,base:gy(f.gu,f.gs||gs),note:`${f.gu.toFixed(2)}p/kWh · ${(f.gs||gs).toFixed(2)}p/day`});
+    if(scope==='all')G.push({nm:'EDF Simply Tracker',sup:'EDF',fixed:false,base:gy(gu,gs)-25,note:'Follows the price cap, with £25 a year off the gas standing charge. Exit fees apply.'})}
+  const gp=v=>'£'+Math.round(v).toLocaleString('en-GB');
+  const cost=(x,rise)=>x.fixed?x.base:x.base*(1+rise/100);
+  const card=(title,L,rise,key,unitNote)=>{if(!L.length)return'';
+    const cur=L.find(x=>x.cur),sorted=L.map(x=>Object.assign(x,{c:cost(x,rise)})).sort((a,b)=>a.c-b.c),best=sorted[0],sv=cur?cur.c-best.c:0;
+    return `<div class="card" style="margin:0 0 12px"><div class="sub" style="margin:0">${title}: cheapest for her usage</div>
+    <div style="font-size:22px;font-weight:700;margin:2px 0">${esc(best.nm)}</div>
+    <div>${gp(best.c/12)} a month · ${best.fixed?'fixed':'variable'}${best.cur?' · <b class="good">her tariff now ✓</b>':` · <b class="good">${gp(sv)} a year less</b> than ${esc(cur.nm)}`}</div>
+    ${best.note?`<div class="sub" style="margin:4px 0 0">${esc(best.note)}</div>`:''}
+    <div style="display:flex;align-items:center;gap:8px;margin:10px 0 6px;font-size:14px">If variable prices rise by
+      <button class="chip" data-rise="${key}" data-d="-5" aria-label="Less" style="padding:4px 14px">−</button><b style="min-width:42px;text-align:center">${rise>0?'+':''}${rise}%</b><button class="chip" data-rise="${key}" data-d="5" aria-label="More" style="padding:4px 14px">+</button></div>
+    <table>${sorted.slice(0,6).concat(sorted.slice(6).filter(x=>x.cur)).map(x=>`<tr${x.cur?' style="background:var(--okbg)"':''}><td>${esc(x.nm)}${x.cur?' <b>(now)</b>':''}<div class="sub" style="margin:0">${esc(x.sup)} · ${x.fixed?'fixed':'variable'}</div></td>
+      <td class="n" style="white-space:nowrap"><b>${gp(x.c/12)}</b>/mo<div class="sub" style="margin:0">${x.cur?gp(x.c)+'/yr':(x.c<cur.c?'−':'+')+gp(Math.abs(x.c-cur.c))+'/yr'}</div></td></tr>`).join('')}</table>
+    <p class="sub" style="margin:6px 0 0">${unitNote}</p></div>`};
+  el.innerHTML=`<div class="chips" role="tablist"><button class="chip ${scope==='all'?'on':''}" data-scope="all">All suppliers</button><button class="chip ${scope==='oct'?'on':''}" data-scope="oct">Octopus only</button></div>`+
+    card('Electricity',E,rE,'riseE',`Her last ${n} days of half-hourly readings, priced on each tariff with the car and the ${Number(cfg.batt)||0} kWh battery charging in its cheap hours. The rise applies to variable tariffs only; fixed prices don't change. January's price cap for Yorkshire is about +25% on electricity.`)+
+    card('Gas',G,rG,'riseG',`About ${Math.round(aG).toLocaleString('en-GB')} kWh a year of gas, adjusted for the weather. January's price cap for Yorkshire is about +38% on gas. ${scope==='all'?"Other suppliers' gas fixes aren't published per region in a form the app can read, so get quotes to compare those.":''}`)+
+    `<p class="sub">Solar export isn't counted. Outgoing Octopus pays 12p/kWh but only to Octopus customers, so moving electricity elsewhere means a new export deal too.</p>`;
+  el.querySelectorAll('[data-scope]').forEach(b=>b.addEventListener('click',()=>{cfg.tScope=b.dataset.scope;saveCfg();renderTariff(model)}));
+  el.querySelectorAll('[data-rise]').forEach(b=>b.addEventListener('click',()=>{const k=b.dataset.rise;cfg[k]=Math.max(-30,Math.min(80,(cfg[k]??(k==='riseE'?25:38))+Number(b.dataset.d)));saveCfg();renderTariff(model)}));
 }
 
 function hourChart(vals,color,unit,shade){
@@ -916,6 +918,7 @@ function renderDD(m,done){
   const heatWin=sum(win,d=>Math.max(0,d.g-base)*(tc&&d.key<tc.date?fT:1)), share=sum(win,d=>hddDay(d.key))/HDD_YEAR;
   const aHeat=share>0?heatWin/share:0, aGas=aHeat+base*365;
   const eDays=done.slice(-365), aElec=eDays.length?sum(eDays,d=>d.e)/eDays.length*365:0;
+  model.aGas=aGas;renderTariff(model);
   const year=aGas*ge+365*gs+aElec*ee+365*es, bal=Number(cfg.bal)||0;
   const r5=v=>Math.ceil(v/5)*5, sugg=r5(Math.max(0,(year-bal)/12));
   const jan=Date.UTC(now.getUTCMonth()===0?now.getUTCFullYear():now.getUTCFullYear()+1,0,1),fr=Math.max(0,Math.min(1,(now.getTime()+365*864e5-jan)/(365*864e5)));
@@ -970,12 +973,12 @@ function renderDD(m,done){
   if(m.raw.elec&&done.length>=14){const d30=done.slice(-30),base=priceSmart(m,d30,m.raw.elec.unit,m.raw.elec.sc);
     const ti=tariffInfo(m),onCur=nm=>ti.curName&&ti.curName.toLowerCase().replace(/\s+/g,' ').trim()===nm.toLowerCase();
     let ref=base?base.asis:0;
-    if(ti.tou&&m.raw.elec.curUnit&&m.raw.elec.curUnit.length){const cv=priceSmart(m,d30,m.raw.elec.curUnit,m.raw.elec.curSc||m.raw.elec.sc);
+    if(ti.tou&&m.raw.elec.curUnit&&m.raw.elec.curUnit.length){const cv=priceNow(m,d30,m.raw.elec.curUnit,m.raw.elec.curSc||m.raw.elec.sc);
       if(cv){ref=cv.smart;add('cheap','Cheap hours',`Use ${esc(ti.curName)}'s cheap hours fully`,(cv.asis-cv.smart)*365/d30.length,`Car charger on a 00:30–05:30 schedule at full 7 kW, and the house battery charging from the grid in the same window. Worked out from her last ${d30.length} days of readings at ${esc(ti.curName)} prices.`,'elec')}}
     const altNote=`Compared with ${esc(ti.curName||'her current tariff')}${ti.tou?' with the car and battery already in its cheap hours':''}, on her last ${d30.length} days of readings, charging in each tariff's own cheap hours.`;
     // best Octopus alternative (all Octopus tariffs the page prices, except the one she's on)
     let bo=null;
-    for(const a of (m.raw.alts||[])){if(onCur(a.name)||!base)continue;const v=priceSmart(m,d30,a.unit,a.sc);if(v){const sv=(ref-v.smart)*365/d30.length;if(!bo||sv>bo.sv)bo={nm:a.name,sv}}}
+    for(const a of (m.raw.alts||[])){if(onCur(a.name)||!base)continue;const v=priceNow(m,d30,a.unit,a.sc);if(v){const sv=(ref-v.smart)*365/d30.length;if(!bo||sv>bo.sv)bo={nm:a.name,sv}}}
     const reqs={'Octopus Flux':'Needs the solar installation certificate. Also pays for exported solar, not counted here.','Octopus Go':'Needs Octopus to accept the car.','Agile Octopus':'Prices change every half hour.','Intelligent Octopus Go':'Needs a car or charger Octopus can control.','Intelligent Octopus Go Max':'Needs a car or charger Octopus can control.'};
     if(bo){if(bo.sv>1)add('octalt',bo.nm.replace('Octopus ','').replace(' Octopus',''),`Best Octopus alternative: ${bo.nm}`,bo.sv,`${reqs[bo.nm]||''} ${altNote}`,'tariff');
       else model.noOct=`No other Octopus tariff beats ${ti.curName||'her current one'} for her usage (the closest, ${bo.nm}, would cost ${gbp(-bo.sv/12)} a month more).`}
