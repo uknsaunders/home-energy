@@ -219,7 +219,7 @@ details .sub{margin:0 0 10px}
 <script>
 (function(){
 'use strict';
-const VERSION='2026-11-26a';
+const VERSION='2026-11-26b';
 const API='https://api.octopus.energy/v1';
 (function selfUpdate(){try{fetch(location.pathname+'?v='+Date.now(),{cache:'no-store'}).then(r=>r.text()).then(t=>{const m=t.match(/const VERSION='([^']+)'/);
   if(m&&m[1]!==VERSION&&sessionStorage.getItem('he_reloaded')!==m[1]){sessionStorage.setItem('he_reloaded',m[1]);location.reload()}}).catch(()=>{})}catch(e){}})();
@@ -583,7 +583,7 @@ function priceSmart(m,days,unit,sc){
 }
 const EXT=[
     {nm:'EDF GoElectric',off:6.66,a:23,b:6,peak:33.52,sc:66.82},
-    {nm:'E.ON Next Drive Fixed V37',off:8.5,a:0,b:6,peak:34.32,sc:60},
+    {nm:'E.ON Next Drive Fixed V37',off:8.5,a:0,b:6,peak:34.45,sc:57.14},
     {nm:'E.ON Next Drive Smart',off:6.5,a:0,b:6,peak:29.12,sc:60},
     {nm:'So Energy So EV',off:7.14,a:0,b:5,peak:41.5,sc:54},
     {nm:'British Gas EV Power',off:9.5,a:0,b:5,peak:36.5,sc:50}];
